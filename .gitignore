@@ -20,8 +20,7 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# Go workspace file
-go.work
+# Go workspace file — committed for monorepo dev (go.work.sum is generated, ignore)
 go.work.sum
 
 # env file
@@ -30,3 +29,6 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Local agent / tool settings
+.claude/
