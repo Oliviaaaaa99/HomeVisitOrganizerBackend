@@ -1,5 +1,7 @@
 # HomeVisitOrganizerBackend
 
+[![CI](https://github.com/Oliviaaaaa99/HomeVisitOrganizerBackend/actions/workflows/ci.yml/badge.svg)](https://github.com/Oliviaaaaa99/HomeVisitOrganizerBackend/actions/workflows/ci.yml)
+
 Backend services for the Apartment Tour Tracker app.
 
 See the design docs for context:
