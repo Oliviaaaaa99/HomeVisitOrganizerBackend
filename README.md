@@ -20,7 +20,7 @@ See the design docs for context:
 ├── services/                  # User-facing services (Go on ECS Fargate in prod)
 │   ├── user-svc/              # M1 — auth (Apple/Google/dev), JWT, refresh tokens
 │   ├── property-svc/          # M2 — properties / units / notes CRUD
-│   ├── media-svc/             # M2 — TODO (presigned uploads)
+│   ├── media-svc/             # M2 — presigned S3 uploads + commit + soft-delete
 │   ├── availability-svc/      # M3 — TODO
 │   ├── ranking-svc/           # M3 — TODO
 │   └── notification-svc/      # M4 — TODO
@@ -47,6 +47,7 @@ make migrate
 # 3. Run the services (each in its own terminal)
 make run-user      # :8080
 make run-property  # :8082
+make run-media     # :8083 (uses LocalStack S3)
 
 # 4. Hit the endpoints
 curl localhost:8080/healthz
@@ -91,6 +92,16 @@ curl -X POST localhost:8082/v1/properties \
 | POST | `/v1/properties/{id}/units` | JWT | Add unit (Studio / 1B / 2B / 3B / Condo / etc) |
 | POST | `/v1/properties/{id}/notes` | JWT | Add free-text note |
 
+### media-svc (`:8083`)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/healthz` | — | Liveness |
+| GET | `/readyz` | — | Pings PG |
+| POST | `/v1/units/{id}/media:presign` | JWT | Get batch of presigned PUT URLs (enforces per-unit quotas: 10 photos / 3 short / 3 long) |
+| POST | `/v1/units/{id}/media:commit` | JWT | Verify uploaded objects exist, persist `media_assets` rows with retention TTL (1y rental / 2y for-sale) |
+| DELETE | `/v1/media/{id}` | JWT | Soft-delete (S3 object stays — purged by retention sweeper in M4) |
+
 ## Layout decisions (see Tech Design Doc §3 for rationale)
 
 - **Multi-module workspace** (`go.work`): each service is its own module to keep dep graphs tight.
@@ -105,7 +116,7 @@ curl -X POST localhost:8082/v1/properties \
 |-----------|-------|--------|
 | M0 | Repo skeleton + user-svc health/readiness + local docker-compose | ✓ |
 | M1 | Apple/Google sign-in + JWT issuance in user-svc; first real DB-backed handler | ✓ |
-| M2 | property-svc + media-svc with presigned upload flow | property-svc ✓, media-svc next |
+| M2 | property-svc + media-svc with presigned upload flow | ✓ |
 | M3 | availability-svc + 3 rental adapters; ranking-svc with Claude Haiku | — |
 | M4 | notification-svc + workers (media, retention, availability) | — |
 
