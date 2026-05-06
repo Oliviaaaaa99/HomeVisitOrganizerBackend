@@ -3,4 +3,5 @@ go 1.22
 use (
 	./shared/go-common
 	./services/user-svc
+	./services/property-svc
 )

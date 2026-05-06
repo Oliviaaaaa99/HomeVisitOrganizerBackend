@@ -40,6 +40,9 @@ services:
       timeout: 3s
       retries: 10
 
+  # The migrate sidecar applies every service's migrations in turn. Each
+  # service uses its own x-migrations-table so the version sequences don't
+  # collide on the shared database.
   migrate:
     image: migrate/migrate:v4.17.1
     depends_on:
@@ -47,15 +50,21 @@ services:
         condition: service_healthy
     volumes:
       - ./services/user-svc/migrations:/migrations/user-svc:ro
+      - ./services/property-svc/migrations:/migrations/property-svc:ro
     profiles: ["tools"]
     entrypoint:
       - /bin/sh
       - -c
       - |
         set -e
-        /migrate -path=/migrations/user-svc -database=$$DATABASE_URL up
-    environment:
-      DATABASE_URL: postgres://hvo:hvo_dev@postgres:5432/hvo?sslmode=disable
+        BASE='postgres://hvo:hvo_dev@postgres:5432/hvo?sslmode=disable'
+        for svc in user-svc property-svc; do
+          tbl=$$(echo "$$svc" | tr '-' '_')_migrations
+          echo ">>> migrate $$svc (table=$$tbl)"
+          /migrate -path=/migrations/$$svc \
+            -database="$$BASE&x-migrations-table=$$tbl" \
+            up
+        done
 
   user-svc:
     build:
@@ -70,8 +79,25 @@ services:
       HTTP_ADDR: ":8080"
       DATABASE_URL: postgres://hvo:hvo_dev@postgres:5432/hvo?sslmode=disable
       REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: dev-secret-not-for-prod-12345678901234
+      ENV: dev
     ports:
       - "8081:8080"
+    profiles: ["app"]
+
+  property-svc:
+    build:
+      context: .
+      dockerfile: services/property-svc/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HTTP_ADDR: ":8082"
+      DATABASE_URL: postgres://hvo:hvo_dev@postgres:5432/hvo?sslmode=disable
+      JWT_SECRET: dev-secret-not-for-prod-12345678901234
+    ports:
+      - "8082:8082"
     profiles: ["app"]
 
 volumes:
