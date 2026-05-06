@@ -46,22 +46,32 @@ migrate-property-down: ## Roll back the last property-svc migration
 		-database='postgres://hvo:hvo_dev@postgres:5432/hvo?sslmode=disable&x-migrations-table=property_svc_migrations' \
 		down 1
 
+.PHONY: migrate-media-down
+migrate-media-down: ## Roll back the last media-svc migration
+	docker compose run --rm migrate \
+		/migrate -path=/migrations/media-svc \
+		-database='postgres://hvo:hvo_dev@postgres:5432/hvo?sslmode=disable&x-migrations-table=media_svc_migrations' \
+		down 1
+
 .PHONY: build
 build: ## Compile all services
 	cd services/user-svc && go build -o /tmp/hvo-user-svc ./cmd/server
 	cd services/property-svc && go build -o /tmp/hvo-property-svc ./cmd/server
+	cd services/media-svc && go build -o /tmp/hvo-media-svc ./cmd/server
 
 .PHONY: test
 test: ## Run all unit tests
 	cd shared/go-common && go test ./...
 	cd services/user-svc && go test ./...
 	cd services/property-svc && go test ./...
+	cd services/media-svc && go test ./...
 
 .PHONY: tidy
 tidy: ## Tidy all go modules
 	cd shared/go-common && go mod tidy
 	cd services/user-svc && go mod tidy
 	cd services/property-svc && go mod tidy
+	cd services/media-svc && go mod tidy
 
 .PHONY: run-user
 run-user: ## Run user-svc against local infra
@@ -78,4 +88,19 @@ run-property: ## Run property-svc against local infra
 		HTTP_ADDR=':8082' \
 		JWT_SECRET='$(JWT_SECRET)' \
 		DATABASE_URL='$(POSTGRES_URL)' \
+		go run ./cmd/server
+
+.PHONY: run-media
+run-media: ## Run media-svc against local infra (uses LocalStack S3)
+	cd services/media-svc && \
+		HTTP_ADDR=':8083' \
+		JWT_SECRET='$(JWT_SECRET)' \
+		DATABASE_URL='$(POSTGRES_URL)' \
+		AWS_REGION=us-east-1 \
+		AWS_ENDPOINT_URL=http://localhost:4566 \
+		AWS_ACCESS_KEY_ID=test \
+		AWS_SECRET_ACCESS_KEY=test \
+		AWS_S3_PATH_STYLE=true \
+		S3_BUCKET=hvo-media-dev \
+		S3_AUTO_CREATE_BUCKET=true \
 		go run ./cmd/server

@@ -4,4 +4,5 @@ use (
 	./shared/go-common
 	./services/user-svc
 	./services/property-svc
+	./services/media-svc
 )
