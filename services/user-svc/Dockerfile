@@ -2,10 +2,14 @@
 FROM golang:1.22-alpine AS builder
 WORKDIR /src
 
-# Cache shared module + service module separately
+# go.work is for local IDE / multi-module dev. Inside Docker we build a single
+# service in module mode — the `replace` directive in go.mod resolves the
+# shared lib. GOWORK=off makes that explicit and avoids "module not in workspace"
+# errors when the build context only has this service.
+ENV GOWORK=off
+
 COPY shared/go-common /src/shared/go-common
 COPY services/user-svc /src/services/user-svc
-COPY go.work /src/go.work
 
 WORKDIR /src/services/user-svc
 RUN go mod download && \

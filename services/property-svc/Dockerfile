@@ -2,9 +2,11 @@
 FROM golang:1.22-alpine AS builder
 WORKDIR /src
 
+# See user-svc Dockerfile for why we set GOWORK=off here.
+ENV GOWORK=off
+
 COPY shared/go-common /src/shared/go-common
 COPY services/property-svc /src/services/property-svc
-COPY go.work /src/go.work
 
 WORKDIR /src/services/property-svc
 RUN go mod download && \
