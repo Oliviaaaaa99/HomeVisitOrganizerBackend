@@ -8,6 +8,7 @@ on:
 
 env:
   GO_VERSION: "1.22"
+  SERVICE_DIRS: "shared/go-common services/user-svc services/property-svc"
 
 jobs:
   # gofmt + go vet — fast, no service deps. Catches syntax / style basics.
@@ -22,6 +23,7 @@ jobs:
           cache-dependency-path: |
             shared/go-common/go.sum
             services/user-svc/go.sum
+            services/property-svc/go.sum
 
       - name: gofmt
         run: |
@@ -35,7 +37,7 @@ jobs:
       - name: go vet
         run: |
           set -e
-          for mod in shared/go-common services/user-svc; do
+          for mod in $SERVICE_DIRS; do
             echo "::group::go vet $mod"
             (cd "$mod" && go vet ./...)
             echo "::endgroup::"
@@ -53,11 +55,13 @@ jobs:
           cache-dependency-path: |
             shared/go-common/go.sum
             services/user-svc/go.sum
+            services/property-svc/go.sum
 
       - name: Build all services
         run: |
           set -e
           (cd services/user-svc && go build ./...)
+          (cd services/property-svc && go build ./...)
 
   # Run unit tests with Postgres + Redis services attached, just like local dev.
   test:
@@ -97,14 +101,18 @@ jobs:
           cache-dependency-path: |
             shared/go-common/go.sum
             services/user-svc/go.sum
+            services/property-svc/go.sum
 
       - name: Run tests
         run: |
           set -e
           (cd shared/go-common && go test -race -count=1 ./...)
           (cd services/user-svc && go test -race -count=1 ./...)
+          (cd services/property-svc && go test -race -count=1 ./...)
 
-  # Round-trip migrations: up → down → up. Catches non-reversible changes.
+  # Round-trip migrations per service: up → down → up. Catches non-reversible
+  # changes. Each service uses its own x-migrations-table, so all live on the
+  # same Postgres without colliding.
   migration:
     name: migration round-trip
     runs-on: ubuntu-latest
@@ -132,35 +140,41 @@ jobs:
           sudo mv /tmp/migrate /usr/local/bin/migrate
           migrate -version
 
-      - name: Up
+      - name: Round-trip user-svc
         env:
-          DATABASE_URL: postgres://hvo:hvo_dev@localhost:5432/hvo?sslmode=disable
-        run: migrate -path services/user-svc/migrations -database "$DATABASE_URL" up
+          BASE_URL: postgres://hvo:hvo_dev@localhost:5432/hvo?sslmode=disable
+        run: |
+          URL="${BASE_URL}&x-migrations-table=user_svc_migrations"
+          migrate -path services/user-svc/migrations -database "$URL" up
+          migrate -path services/user-svc/migrations -database "$URL" down -all
+          migrate -path services/user-svc/migrations -database "$URL" up
 
-      - name: Down all
+      - name: Round-trip property-svc
         env:
-          DATABASE_URL: postgres://hvo:hvo_dev@localhost:5432/hvo?sslmode=disable
-        run: migrate -path services/user-svc/migrations -database "$DATABASE_URL" down -all
+          BASE_URL: postgres://hvo:hvo_dev@localhost:5432/hvo?sslmode=disable
+        run: |
+          URL="${BASE_URL}&x-migrations-table=property_svc_migrations"
+          migrate -path services/property-svc/migrations -database "$URL" up
+          migrate -path services/property-svc/migrations -database "$URL" down -all
+          migrate -path services/property-svc/migrations -database "$URL" up
 
-      - name: Up again (idempotency)
-        env:
-          DATABASE_URL: postgres://hvo:hvo_dev@localhost:5432/hvo?sslmode=disable
-        run: migrate -path services/user-svc/migrations -database "$DATABASE_URL" up
-
-  # Build the Docker image to make sure the Dockerfile still works.
+  # Build each Dockerfile to make sure they still work.
   docker-build:
     name: docker build
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [user-svc, property-svc]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Build user-svc image
+      - name: Build ${{ matrix.service }} image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: services/user-svc/Dockerfile
+          file: services/${{ matrix.service }}/Dockerfile
           push: false
           load: true
-          tags: user-svc:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ matrix.service }}:ci
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
