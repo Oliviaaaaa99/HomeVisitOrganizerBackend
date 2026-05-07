@@ -1,0 +1,1 @@
+ALTER TABLE notes DROP COLUMN IF EXISTS updated_at;

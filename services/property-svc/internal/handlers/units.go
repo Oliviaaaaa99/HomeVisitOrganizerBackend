@@ -31,6 +31,7 @@ type unitResponse struct {
 	Baths         *float64 `json:"baths,omitempty"`
 	AvailableFrom *string  `json:"available_from,omitempty"`
 	CreatedAt     string   `json:"created_at"`
+	UpdatedAt     string   `json:"updated_at"`
 }
 
 func toUnitResponse(u *store.Unit) unitResponse {
@@ -50,7 +51,93 @@ func toUnitResponse(u *store.Unit) unitResponse {
 		Baths:         u.Baths,
 		AvailableFrom: availStr,
 		CreatedAt:     u.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:     u.UpdatedAt.UTC().Format(time.RFC3339),
 	}
+}
+
+type updateUnitRequest struct {
+	UnitLabel     *string  `json:"unit_label,omitempty"`
+	UnitType      *string  `json:"unit_type,omitempty"`
+	PriceCents    *int64   `json:"price_cents,omitempty"`
+	Sqft          *int     `json:"sqft,omitempty"`
+	Beds          *int     `json:"beds,omitempty"`
+	Baths         *float64 `json:"baths,omitempty"`
+	AvailableFrom *string  `json:"available_from,omitempty"`
+}
+
+// UpdateUnit handles PATCH /v1/units/{id}.
+func (h *Handlers) UpdateUnit(w http.ResponseWriter, r *http.Request) {
+	userID, ok := authedUser(w, r)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_id", err.Error())
+		return
+	}
+	var req updateUnitRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body", err.Error())
+		return
+	}
+	in := store.UpdateUnitInput{
+		ID:         id,
+		UserID:     userID,
+		UnitLabel:  req.UnitLabel,
+		UnitType:   req.UnitType,
+		PriceCents: req.PriceCents,
+		Sqft:       req.Sqft,
+		Beds:       req.Beds,
+		Baths:      req.Baths,
+	}
+	if req.AvailableFrom != nil {
+		if *req.AvailableFrom == "" {
+			// Treat empty string as "no change" rather than NULL — Tier 1 client
+			// doesn't have a clear-date affordance yet.
+		} else {
+			t, err := time.Parse("2006-01-02", *req.AvailableFrom)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_date", "available_from must be YYYY-MM-DD")
+				return
+			}
+			in.AvailableFrom = &t
+		}
+	}
+
+	unit, err := h.units.Update(r.Context(), in)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "update_failed", err.Error())
+		return
+	}
+	if unit == nil {
+		writeError(w, http.StatusNotFound, "not_found", "unit not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, toUnitResponse(unit))
+}
+
+// DeleteUnit handles DELETE /v1/units/{id} — hard delete.
+func (h *Handlers) DeleteUnit(w http.ResponseWriter, r *http.Request) {
+	userID, ok := authedUser(w, r)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_id", err.Error())
+		return
+	}
+	deleted, err := h.units.Delete(r.Context(), id, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "delete_failed", err.Error())
+		return
+	}
+	if !deleted {
+		writeError(w, http.StatusNotFound, "not_found", "unit not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // CreateUnit handles POST /v1/properties/{id}/units.

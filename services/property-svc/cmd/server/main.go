@@ -77,6 +77,12 @@ func run() error {
 			r.Post("/units", h.CreateUnit)
 			r.Post("/notes", h.CreateNote)
 		})
+		// Top-level by id for unit / note mutation. Cross-user isolation
+		// is enforced inside the store via subquery on properties.user_id.
+		r.Patch("/units/{id}", h.UpdateUnit)
+		r.Delete("/units/{id}", h.DeleteUnit)
+		r.Patch("/notes/{id}", h.UpdateNote)
+		r.Delete("/notes/{id}", h.DeleteNote)
 	})
 
 	srv := &http.Server{
