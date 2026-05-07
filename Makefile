@@ -90,14 +90,19 @@ run-property: ## Run property-svc against local infra
 		DATABASE_URL='$(POSTGRES_URL)' \
 		go run ./cmd/server
 
+# Pick the Mac's WiFi IP so presigned URLs are reachable from a phone on the
+# same network. Falls back to localhost if no LAN.
+LAN_IP ?= $(shell ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo localhost)
+
 .PHONY: run-media
-run-media: ## Run media-svc against local infra (uses LocalStack S3)
+run-media: ## Run media-svc against local infra (uses LocalStack S3, iPhone-reachable URLs)
+	@echo "Using AWS_ENDPOINT_URL=http://$(LAN_IP):4566 (iPhone reachable)"
 	cd services/media-svc && \
 		HTTP_ADDR=':8083' \
 		JWT_SECRET='$(JWT_SECRET)' \
 		DATABASE_URL='$(POSTGRES_URL)' \
 		AWS_REGION=us-east-1 \
-		AWS_ENDPOINT_URL=http://localhost:4566 \
+		AWS_ENDPOINT_URL=http://$(LAN_IP):4566 \
 		AWS_ACCESS_KEY_ID=test \
 		AWS_SECRET_ACCESS_KEY=test \
 		AWS_S3_PATH_STYLE=true \
