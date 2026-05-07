@@ -253,8 +253,11 @@ func (h *Handlers) UpdateProperty(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toResponse(prop))
 }
 
-// ArchiveProperty handles DELETE /v1/properties/{id} — soft-archive.
-func (h *Handlers) ArchiveProperty(w http.ResponseWriter, r *http.Request) {
+// DeleteProperty handles DELETE /v1/properties/{id} — true hard delete:
+// removes the property, its units, its notes, and the media_assets rows for
+// each unit, all in one transaction. The "archived" status is still available
+// for soft-archive via PATCH {status: "archived"}.
+func (h *Handlers) DeleteProperty(w http.ResponseWriter, r *http.Request) {
 	userID, ok := authedUser(w, r)
 	if !ok {
 		return
@@ -264,12 +267,12 @@ func (h *Handlers) ArchiveProperty(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_id", err.Error())
 		return
 	}
-	archived, err := h.properties.Archive(r.Context(), id, userID)
+	deleted, err := h.properties.HardDelete(r.Context(), id, userID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "archive_failed", err.Error())
+		writeError(w, http.StatusInternalServerError, "delete_failed", err.Error())
 		return
 	}
-	if !archived {
+	if !deleted {
 		writeError(w, http.StatusNotFound, "not_found", "property not found")
 		return
 	}
