@@ -172,11 +172,22 @@ func (h *Handlers) GetProperty(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// updateRequest is a partial update — every field is a pointer so we can tell
+// "client didn't include this field" apart from "client wants to clear/zero it".
 type updateRequest struct {
-	Status string `json:"status"`
+	Address   *string  `json:"address,omitempty"`
+	Kind      *string  `json:"kind,omitempty"`
+	SourceURL *string  `json:"source_url,omitempty"`
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
+	Status    *string  `json:"status,omitempty"`
 }
 
-// UpdateProperty handles PATCH /v1/properties/{id} — currently only status update.
+// UpdateProperty handles PATCH /v1/properties/{id}.
+//
+// Any subset of {address, kind, source_url, latitude+longitude, status} can be
+// sent. Omitted fields are left untouched. Sending one of latitude/longitude
+// without the other is ignored.
 func (h *Handlers) UpdateProperty(w http.ResponseWriter, r *http.Request) {
 	userID, ok := authedUser(w, r)
 	if !ok {
@@ -192,14 +203,45 @@ func (h *Handlers) UpdateProperty(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_body", err.Error())
 		return
 	}
-	switch req.Status {
-	case "toured", "shortlisted", "rejected", "archived":
-	default:
-		writeError(w, http.StatusBadRequest, "invalid_status", "status must be toured/shortlisted/rejected/archived")
+
+	// Validate enums if present.
+	if req.Status != nil {
+		switch *req.Status {
+		case "toured", "shortlisted", "rejected", "archived":
+		default:
+			writeError(w, http.StatusBadRequest, "invalid_status", "status must be toured/shortlisted/rejected/archived")
+			return
+		}
+	}
+	if req.Kind != nil {
+		switch *req.Kind {
+		case "rental", "for_sale":
+		default:
+			writeError(w, http.StatusBadRequest, "invalid_kind", "kind must be 'rental' or 'for_sale'")
+			return
+		}
+	}
+	if req.Address != nil && *req.Address == "" {
+		writeError(w, http.StatusBadRequest, "invalid_address", "address cannot be empty")
 		return
 	}
 
-	prop, err := h.properties.UpdateStatus(r.Context(), id, userID, req.Status)
+	// Coords must come together.
+	if (req.Latitude != nil) != (req.Longitude != nil) {
+		writeError(w, http.StatusBadRequest, "invalid_coords", "send both latitude and longitude or neither")
+		return
+	}
+
+	prop, err := h.properties.Update(r.Context(), store.UpdateInput{
+		ID:        id,
+		UserID:    userID,
+		Address:   req.Address,
+		Kind:      req.Kind,
+		SourceURL: req.SourceURL,
+		Latitude:  req.Latitude,
+		Longitude: req.Longitude,
+		Status:    req.Status,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "update_failed", err.Error())
 		return

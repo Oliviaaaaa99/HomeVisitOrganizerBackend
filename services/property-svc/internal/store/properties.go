@@ -117,15 +117,49 @@ func (p *Properties) List(ctx context.Context, in ListInput) ([]*Property, error
 }
 
 // UpdateStatus transitions a property's status; returns the updated row.
-// Returns nil if not owned by user.
+// Kept as a thin wrapper for handlers that only need to flip status.
 func (p *Properties) UpdateStatus(ctx context.Context, id, userID uuid.UUID, status string) (*Property, error) {
+	return p.Update(ctx, UpdateInput{ID: id, UserID: userID, Status: &status})
+}
+
+// UpdateInput is a partial-update payload. nil pointer = leave field as-is.
+type UpdateInput struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	Address   *string
+	Kind      *string
+	SourceURL *string
+	Latitude  *float64
+	Longitude *float64
+	Status    *string
+}
+
+// Update applies a partial update and returns the canonical row. Any nil
+// pointer field is left untouched. Latitude+Longitude must be sent together
+// (either both or neither) — sending only one is treated as no-op for location.
+func (p *Properties) Update(ctx context.Context, in UpdateInput) (*Property, error) {
 	const q = `
-		UPDATE properties SET status = $3, updated_at = now()
+		UPDATE properties SET
+		  address    = COALESCE($3, address),
+		  kind       = COALESCE($4, kind),
+		  source_url = CASE WHEN $5::TEXT IS NULL THEN source_url ELSE NULLIF($5, '') END,
+		  location   = CASE
+		    WHEN $6::FLOAT8 IS NOT NULL AND $7::FLOAT8 IS NOT NULL
+		      THEN ST_SetSRID(ST_MakePoint($7::FLOAT8, $6::FLOAT8), 4326)::GEOGRAPHY
+		    ELSE location
+		  END,
+		  status     = COALESCE($8, status),
+		  updated_at = now()
 		WHERE id = $1 AND user_id = $2
 		RETURNING id, user_id, address,
 		          ST_Y(location::geometry), ST_X(location::geometry),
 		          kind, source_url, status, created_at, updated_at`
-	row := p.pool.QueryRow(ctx, q, id, userID, status)
+	row := p.pool.QueryRow(ctx, q,
+		in.ID, in.UserID,
+		in.Address, in.Kind, in.SourceURL,
+		in.Latitude, in.Longitude,
+		in.Status,
+	)
 	prop, err := scanProperty(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
