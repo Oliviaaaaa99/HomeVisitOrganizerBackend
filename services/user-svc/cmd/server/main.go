@@ -101,7 +101,30 @@ func run() error {
 	}
 
 	auth := service.NewAuth(idps, users, refresh, jwtIssuer, refreshTTL)
-	h := handlers.New(pg, rdb, auth, users)
+
+	// Optional S3 client for avatars. If S3_BUCKET isn't set, avatar endpoints
+	// return 503 — useful so dev runs without LocalStack still come up cleanly.
+	var s3Client *clients.S3
+	if bucket := configx.String("S3_BUCKET", ""); bucket != "" {
+		s3Cfg := clients.Config{
+			Region:       configx.String("AWS_REGION", "us-east-1"),
+			Bucket:       bucket,
+			Endpoint:     configx.String("AWS_ENDPOINT_URL", ""),
+			AccessKey:    configx.String("AWS_ACCESS_KEY_ID", ""),
+			SecretKey:    configx.String("AWS_SECRET_ACCESS_KEY", ""),
+			UsePathStyle: configx.String("AWS_S3_PATH_STYLE", "false") == "true",
+			PresignTTL:   configx.Duration("PRESIGN_TTL", 5*time.Minute),
+		}
+		s3Client, err = clients.NewS3(ctx, s3Cfg)
+		if err != nil {
+			return err
+		}
+		slog.Info("avatar uploads enabled", "bucket", bucket)
+	} else {
+		slog.Info("S3_BUCKET not set — avatar endpoints disabled")
+	}
+
+	h := handlers.New(pg, rdb, auth, users, s3Client)
 
 	r := chi.NewRouter()
 	r.Use(httpx.RequestID, httpx.Logger, httpx.Recoverer)
@@ -118,6 +141,9 @@ func run() error {
 		r.Group(func(r chi.Router) {
 			r.Use(authx.Middleware(jwtVerifier))
 			r.Get("/users/me", h.Me)
+			r.Post("/users/me/avatar:presign", h.PresignAvatar)
+			r.Post("/users/me/avatar:commit", h.CommitAvatar)
+			r.Delete("/users/me/avatar", h.DeleteAvatar)
 		})
 	})
 

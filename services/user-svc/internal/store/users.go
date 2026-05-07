@@ -17,12 +17,13 @@ import (
 
 // User mirrors the row returned by SELECT * FROM users.
 type User struct {
-	ID         uuid.UUID
-	ExternalID string
-	Provider   string
-	EmailHash  *string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID          uuid.UUID
+	ExternalID  string
+	Provider    string
+	EmailHash   *string
+	AvatarS3Key *string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Users is the data-access layer for the users table.
@@ -38,11 +39,11 @@ func NewUsers(pool *pgxpool.Pool) *Users {
 // FindByExternalID returns a user by (provider, external_id), or nil if not found.
 func (u *Users) FindByExternalID(ctx context.Context, provider, externalID string) (*User, error) {
 	const q = `
-		SELECT id, external_id, provider, email_hash, created_at, updated_at
+		SELECT id, external_id, provider, email_hash, avatar_s3_key, created_at, updated_at
 		FROM users WHERE provider = $1 AND external_id = $2`
 	row := u.pool.QueryRow(ctx, q, provider, externalID)
 	var user User
-	err := row.Scan(&user.ID, &user.ExternalID, &user.Provider, &user.EmailHash, &user.CreatedAt, &user.UpdatedAt)
+	err := row.Scan(&user.ID, &user.ExternalID, &user.Provider, &user.EmailHash, &user.AvatarS3Key, &user.CreatedAt, &user.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -55,11 +56,11 @@ func (u *Users) FindByExternalID(ctx context.Context, provider, externalID strin
 // FindByID returns a user by primary key, or nil if not found.
 func (u *Users) FindByID(ctx context.Context, id uuid.UUID) (*User, error) {
 	const q = `
-		SELECT id, external_id, provider, email_hash, created_at, updated_at
+		SELECT id, external_id, provider, email_hash, avatar_s3_key, created_at, updated_at
 		FROM users WHERE id = $1`
 	row := u.pool.QueryRow(ctx, q, id)
 	var user User
-	err := row.Scan(&user.ID, &user.ExternalID, &user.Provider, &user.EmailHash, &user.CreatedAt, &user.UpdatedAt)
+	err := row.Scan(&user.ID, &user.ExternalID, &user.Provider, &user.EmailHash, &user.AvatarS3Key, &user.CreatedAt, &user.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -78,11 +79,38 @@ func (u *Users) Upsert(ctx context.Context, provider, externalID string, emailHa
 		ON CONFLICT (provider, external_id) DO UPDATE
 		  SET email_hash = COALESCE(NULLIF(EXCLUDED.email_hash, ''), users.email_hash),
 		      updated_at = now()
-		RETURNING id, external_id, provider, email_hash, created_at, updated_at`
+		RETURNING id, external_id, provider, email_hash, avatar_s3_key, created_at, updated_at`
 	row := u.pool.QueryRow(ctx, q, provider, externalID, emailHash)
 	var user User
-	if err := row.Scan(&user.ID, &user.ExternalID, &user.Provider, &user.EmailHash, &user.CreatedAt, &user.UpdatedAt); err != nil {
+	if err := row.Scan(&user.ID, &user.ExternalID, &user.Provider, &user.EmailHash, &user.AvatarS3Key, &user.CreatedAt, &user.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("upsert user: %w", err)
 	}
 	return &user, nil
+}
+
+// SetAvatarKey replaces (or clears, if key is empty) the user's avatar_s3_key
+// and returns the previously-stored key. Callers use the returned old key to
+// delete the now-orphan S3 object.
+//
+// The CTE reads the existing row first so the returned key is the *prior*
+// value, not the just-written one (otherwise it'd just be `key` again).
+func (u *Users) SetAvatarKey(ctx context.Context, id uuid.UUID, key string) (*string, error) {
+	const q = `
+		WITH prior AS (
+		  SELECT avatar_s3_key FROM users WHERE id = $1
+		), upd AS (
+		  UPDATE users
+		  SET avatar_s3_key = NULLIF($2, ''), updated_at = now()
+		  WHERE id = $1
+		  RETURNING 1
+		)
+		SELECT prior.avatar_s3_key FROM prior, upd`
+	var oldKey *string
+	if err := u.pool.QueryRow(ctx, q, id, key).Scan(&oldKey); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("set avatar: %w", err)
+	}
+	return oldKey, nil
 }
