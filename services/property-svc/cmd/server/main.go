@@ -73,7 +73,7 @@ func run() error {
 		r.Route("/properties/{id}", func(r chi.Router) {
 			r.Get("/", h.GetProperty)
 			r.Patch("/", h.UpdateProperty)
-			r.Delete("/", h.ArchiveProperty)
+			r.Delete("/", h.DeleteProperty)
 			r.Post("/units", h.CreateUnit)
 			r.Post("/notes", h.CreateNote)
 		})

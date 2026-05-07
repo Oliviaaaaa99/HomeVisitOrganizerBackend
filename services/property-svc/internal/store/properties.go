@@ -167,14 +167,58 @@ func (p *Properties) Update(ctx context.Context, in UpdateInput) (*Property, err
 	return prop, err
 }
 
-// Archive soft-deletes by setting status='archived'. Returns true if a row matched.
-func (p *Properties) Archive(ctx context.Context, id, userID uuid.UUID) (bool, error) {
-	const q = `UPDATE properties SET status = 'archived', updated_at = now() WHERE id = $1 AND user_id = $2`
-	tag, err := p.pool.Exec(ctx, q, id, userID)
+// HardDelete removes a property and all of its dependents in a single
+// transaction:
+//
+//   - media_assets rows for any unit under this property (no FK exists across
+//     services, so we delete them explicitly while we're in the same DB)
+//   - units (FK CASCADE on properties.id)
+//   - notes (FK CASCADE on properties.id)
+//   - the property row itself
+//
+// Returns true if the property was found and deleted. S3 objects for the
+// deleted media are intentionally not removed here — the retention sweeper
+// (M4) will clean them up. Archive-as-status remains available via
+// PATCH /v1/properties/{id} {status: "archived"}.
+func (p *Properties) HardDelete(ctx context.Context, id, userID uuid.UUID) (bool, error) {
+	tx, err := p.pool.Begin(ctx)
 	if err != nil {
-		return false, fmt.Errorf("archive: %w", err)
+		return false, fmt.Errorf("begin tx: %w", err)
 	}
-	return tag.RowsAffected() > 0, nil
+	defer tx.Rollback(ctx) //nolint:errcheck // best-effort on success path
+
+	// Verify ownership up front so we can return a clean false-not-found.
+	const ownQ = `SELECT 1 FROM properties WHERE id = $1 AND user_id = $2`
+	var dummy int
+	if err := tx.QueryRow(ctx, ownQ, id, userID).Scan(&dummy); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("ownership check: %w", err)
+	}
+
+	// 1. media_assets — no FK, delete by unit_id IN (...).
+	const delMediaQ = `
+		DELETE FROM media_assets
+		WHERE unit_id IN (SELECT id FROM units WHERE property_id = $1)`
+	if _, err := tx.Exec(ctx, delMediaQ, id); err != nil {
+		return false, fmt.Errorf("delete media: %w", err)
+	}
+
+	// 2. property — units & notes cascade automatically.
+	const delPropQ = `DELETE FROM properties WHERE id = $1 AND user_id = $2`
+	tag, err := tx.Exec(ctx, delPropQ, id, userID)
+	if err != nil {
+		return false, fmt.Errorf("delete property: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return false, nil
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit: %w", err)
+	}
+	return true, nil
 }
 
 // scannable is the subset of pgx.Row / pgx.Rows we need.
