@@ -113,6 +113,24 @@ func (m *Media) FindOwned(ctx context.Context, id, userID uuid.UUID) (*MediaAsse
 	return ma, err
 }
 
+// UpdateCaption updates the caption on an active row owned by userID. An empty
+// string clears the caption (stored as NULL). Returns the canonical updated row,
+// or (nil, nil) if no matching active row exists.
+func (m *Media) UpdateCaption(ctx context.Context, id, userID uuid.UUID, caption string) (*MediaAsset, error) {
+	const q = `
+		UPDATE media_assets
+		SET caption = NULLIF($3, '')
+		WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
+		RETURNING id, unit_id, user_id, media_type, s3_key, thumb_key,
+		          duration_s, caption, captured_at, expires_at, deleted_at, created_at`
+	row := m.pool.QueryRow(ctx, q, id, userID, caption)
+	ma, err := scanMedia(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return ma, err
+}
+
 // SoftDelete marks the row as deleted. Returns true if a row was affected.
 // The S3 object stays in place — hard-delete happens in the retention sweeper.
 func (m *Media) SoftDelete(ctx context.Context, id, userID uuid.UUID) (bool, error) {

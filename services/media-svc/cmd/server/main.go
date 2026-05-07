@@ -95,6 +95,7 @@ func run() error {
 		// query param.
 		r.Post("/units/{id}/media:presign", h.Presign)
 		r.Post("/units/{id}/media:commit", h.Commit)
+		r.Patch("/media/{id}", h.Update)
 		r.Delete("/media/{id}", h.Delete)
 	})
 

@@ -90,6 +90,42 @@ func (h *Handlers) Commit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, commitResponse{Committed: committed})
 }
 
+type updateMediaRequest struct {
+	Caption *string `json:"caption"`
+}
+
+// Update handles PATCH /v1/media/{id} — currently caption-only.
+func (h *Handlers) Update(w http.ResponseWriter, r *http.Request) {
+	userID, ok := authedUser(w, r)
+	if !ok {
+		return
+	}
+	mediaID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_id", err.Error())
+		return
+	}
+	var req updateMediaRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body", err.Error())
+		return
+	}
+	if req.Caption == nil {
+		writeError(w, http.StatusBadRequest, "no_fields", "no editable fields supplied")
+		return
+	}
+	updated, err := h.media.UpdateCaption(r.Context(), mediaID, userID, *req.Caption)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "update_failed", err.Error())
+		return
+	}
+	if updated == nil {
+		writeError(w, http.StatusNotFound, "not_found", "media not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
 // Delete handles DELETE /v1/media/{id} — soft-delete only.
 func (h *Handlers) Delete(w http.ResponseWriter, r *http.Request) {
 	userID, ok := authedUser(w, r)

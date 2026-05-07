@@ -179,6 +179,32 @@ func (m *Media) Commit(ctx context.Context, unitID, userID uuid.UUID, items []Co
 	return out, nil
 }
 
+// UpdatedMedia is the persisted row we return after a caption edit.
+type UpdatedMedia struct {
+	ID        string  `json:"id"`
+	S3Key     string  `json:"s3_key"`
+	MediaType string  `json:"media_type"`
+	Caption   *string `json:"caption,omitempty"`
+}
+
+// UpdateCaption sets/clears the caption on a media row owned by userID. Empty
+// string clears it. Returns nil if the row doesn't exist or isn't owned.
+func (m *Media) UpdateCaption(ctx context.Context, mediaID, userID uuid.UUID, caption string) (*UpdatedMedia, error) {
+	row, err := m.media.UpdateCaption(ctx, mediaID, userID, caption)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		return nil, nil
+	}
+	return &UpdatedMedia{
+		ID:        row.ID.String(),
+		S3Key:     row.S3Key,
+		MediaType: row.MediaType,
+		Caption:   row.Caption,
+	}, nil
+}
+
 // SoftDelete removes a media row (S3 object stays — retention sweeper purges later).
 func (m *Media) SoftDelete(ctx context.Context, mediaID, userID uuid.UUID) (bool, error) {
 	return m.media.SoftDelete(ctx, mediaID, userID)
