@@ -210,6 +210,51 @@ func (m *Media) SoftDelete(ctx context.Context, mediaID, userID uuid.UUID) (bool
 	return m.media.SoftDelete(ctx, mediaID, userID)
 }
 
+// MediaListItem is what we return for each media in a list response: the row
+// fields plus a directly-fetchable URL for the client.
+type MediaListItem struct {
+	ID         string    `json:"id"`
+	UnitID     string    `json:"unit_id"`
+	MediaType  string    `json:"media_type"`
+	S3Key      string    `json:"s3_key"`
+	URL        string    `json:"url"`
+	DurationS  *float64  `json:"duration_s,omitempty"`
+	Caption    *string   `json:"caption,omitempty"`
+	CapturedAt time.Time `json:"captured_at"`
+	ExpiresAt  time.Time `json:"expires_at"`
+}
+
+// ListByUnit returns active (not soft-deleted) media for a unit, with each
+// row enriched by a directly-fetchable URL.
+func (m *Media) ListByUnit(ctx context.Context, unitID, userID uuid.UUID) ([]MediaListItem, error) {
+	owner, err := m.owner.FindUnitForUser(ctx, unitID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if owner == nil {
+		return nil, ErrUnitNotOwned
+	}
+	rows, err := m.media.ListActive(ctx, unitID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MediaListItem, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, MediaListItem{
+			ID:         r.ID.String(),
+			UnitID:     r.UnitID.String(),
+			MediaType:  r.MediaType,
+			S3Key:      r.S3Key,
+			URL:        m.s3.PublicURL(r.S3Key),
+			DurationS:  r.DurationS,
+			Caption:    r.Caption,
+			CapturedAt: r.CapturedAt,
+			ExpiresAt:  r.ExpiresAt,
+		})
+	}
+	return out, nil
+}
+
 func validMediaType(t string) bool {
 	switch t {
 	case "photo", "video_short", "video_long":

@@ -31,6 +31,7 @@ type S3 struct {
 	cli        *s3.Client
 	presign    *s3.PresignClient
 	bucket     string
+	endpoint   string // empty for real AWS; the LocalStack URL for dev
 	presignTTL time.Duration
 }
 
@@ -70,30 +71,64 @@ func NewS3(ctx context.Context, cfg Config) (*S3, error) {
 		cli:        cli,
 		presign:    s3.NewPresignClient(cli),
 		bucket:     cfg.Bucket,
+		endpoint:   cfg.Endpoint,
 		presignTTL: cfg.PresignTTL,
 	}, nil
 }
 
-// EnsureBucket creates the bucket if it doesn't already exist (dev convenience
-// for LocalStack). On real AWS this should be a Terraform/CDK-managed resource.
+// EnsureBucket creates the bucket if it doesn't already exist AND applies a
+// public-read policy (dev convenience for LocalStack — lets the mobile client
+// load images by direct URL without signing every GET).
+//
+// On real AWS this should be a Terraform/CDK-managed resource with a private
+// bucket + CloudFront + signed cookies. We still issue presigned PUTs for
+// uploads either way; the public-read here is only about GETting back what's
+// already public-by-intent (a user's own photos in the dev sandbox).
 func (s *S3) EnsureBucket(ctx context.Context) error {
 	_, err := s.cli.CreateBucket(ctx, &s3.CreateBucketInput{
 		Bucket: aws.String(s.bucket),
 	})
-	if err == nil {
+	if err != nil {
+		// Already-exists is fine.
+		var owned *types.BucketAlreadyOwnedByYou
+		var exists *types.BucketAlreadyExists
+		if !(errors.As(err, &owned) || errors.As(err, &exists) || isAlreadyExists(err)) {
+			return fmt.Errorf("ensure bucket %q: %w", s.bucket, err)
+		}
+	}
+
+	// Best-effort public-read policy. LocalStack accepts this; on real AWS the
+	// bucket would be CDK-managed and we'd skip this codepath entirely.
+	policy := fmt.Sprintf(`{
+		"Version": "2012-10-17",
+		"Statement": [{
+			"Sid": "PublicRead",
+			"Effect": "Allow",
+			"Principal": "*",
+			"Action": "s3:GetObject",
+			"Resource": "arn:aws:s3:::%s/*"
+		}]
+	}`, s.bucket)
+	if _, perr := s.cli.PutBucketPolicy(ctx, &s3.PutBucketPolicyInput{
+		Bucket: aws.String(s.bucket),
+		Policy: aws.String(policy),
+	}); perr != nil {
+		// Don't fail boot if policy set fails — uploads still work via presign.
+		// Worst case images come back 403 and the UI shows the broken-image state.
 		return nil
 	}
-	// Already-exists is fine.
-	var owned *types.BucketAlreadyOwnedByYou
-	var exists *types.BucketAlreadyExists
-	if errors.As(err, &owned) || errors.As(err, &exists) {
-		return nil
+	return nil
+}
+
+// PublicURL builds a direct-GET URL for an object key. Only meaningful when
+// the bucket has a public-read policy (true in dev via LocalStack; in prod
+// this should not be called — use a CloudFront/signed-cookie strategy).
+func (s *S3) PublicURL(key string) string {
+	if s.endpoint == "" {
+		return fmt.Sprintf("https://%s.s3.amazonaws.com/%s", s.bucket, key)
 	}
-	// LocalStack may report a generic "BucketAlreadyExists" via the wire.
-	if isAlreadyExists(err) {
-		return nil
-	}
-	return fmt.Errorf("ensure bucket %q: %w", s.bucket, err)
+	// Path-style for LocalStack & co.
+	return fmt.Sprintf("%s/%s/%s", s.endpoint, s.bucket, key)
 }
 
 func isAlreadyExists(err error) bool {

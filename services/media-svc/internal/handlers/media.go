@@ -90,6 +90,34 @@ func (h *Handlers) Commit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, commitResponse{Committed: committed})
 }
 
+type listResponse struct {
+	Items []service.MediaListItem `json:"items"`
+}
+
+// List handles GET /v1/units/{id}/media.
+func (h *Handlers) List(w http.ResponseWriter, r *http.Request) {
+	userID, ok := authedUser(w, r)
+	if !ok {
+		return
+	}
+	unitID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_id", err.Error())
+		return
+	}
+	items, err := h.media.ListByUnit(r.Context(), unitID, userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrUnitNotOwned):
+			writeError(w, http.StatusNotFound, "unit_not_found", "")
+		default:
+			writeError(w, http.StatusInternalServerError, "list_failed", err.Error())
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, listResponse{Items: items})
+}
+
 type updateMediaRequest struct {
 	Caption *string `json:"caption"`
 }
