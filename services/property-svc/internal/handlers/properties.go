@@ -21,7 +21,6 @@ type propertyResponse struct {
 	Longitude *float64 `json:"longitude,omitempty"`
 	Kind      string   `json:"kind"`
 	SourceURL *string  `json:"source_url,omitempty"`
-	Status    string   `json:"status"`
 	CreatedAt string   `json:"created_at"`
 	UpdatedAt string   `json:"updated_at"`
 }
@@ -35,7 +34,6 @@ func toResponse(p *store.Property) propertyResponse {
 		Longitude: p.Longitude,
 		Kind:      p.Kind,
 		SourceURL: p.SourceURL,
-		Status:    p.Status,
 		CreatedAt: p.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt: p.UpdatedAt.UTC().Format(time.RFC3339),
 	}
@@ -86,7 +84,11 @@ func (h *Handlers) CreateProperty(w http.ResponseWriter, r *http.Request) {
 
 // ListProperties handles GET /v1/properties.
 //
-// Query: ?status=&kind=&page_size=&page=
+// Query: ?kind=&page_size=&page=
+//
+// Filtering by status used to be supported here but status is a unit-level
+// concept now (migration 005). Clients filter by status client-side after
+// fetching units.
 func (h *Handlers) ListProperties(w http.ResponseWriter, r *http.Request) {
 	userID, ok := authedUser(w, r)
 	if !ok {
@@ -104,7 +106,6 @@ func (h *Handlers) ListProperties(w http.ResponseWriter, r *http.Request) {
 
 	props, err := h.properties.List(r.Context(), store.ListInput{
 		UserID: userID,
-		Status: q.Get("status"),
 		Kind:   q.Get("kind"),
 		Limit:  pageSize,
 		Offset: page * pageSize,
@@ -180,14 +181,14 @@ type updateRequest struct {
 	SourceURL *string  `json:"source_url,omitempty"`
 	Latitude  *float64 `json:"latitude,omitempty"`
 	Longitude *float64 `json:"longitude,omitempty"`
-	Status    *string  `json:"status,omitempty"`
 }
 
 // UpdateProperty handles PATCH /v1/properties/{id}.
 //
-// Any subset of {address, kind, source_url, latitude+longitude, status} can be
+// Any subset of {address, kind, source_url, latitude+longitude} can be
 // sent. Omitted fields are left untouched. Sending one of latitude/longitude
-// without the other is ignored.
+// without the other is ignored. Status moved to the unit; use
+// PATCH /v1/units/{id} to flip a unit's tour state.
 func (h *Handlers) UpdateProperty(w http.ResponseWriter, r *http.Request) {
 	userID, ok := authedUser(w, r)
 	if !ok {
@@ -205,14 +206,6 @@ func (h *Handlers) UpdateProperty(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate enums if present.
-	if req.Status != nil {
-		switch *req.Status {
-		case "toured", "shortlisted", "rejected", "archived":
-		default:
-			writeError(w, http.StatusBadRequest, "invalid_status", "status must be toured/shortlisted/rejected/archived")
-			return
-		}
-	}
 	if req.Kind != nil {
 		switch *req.Kind {
 		case "rental", "for_sale":
@@ -240,7 +233,6 @@ func (h *Handlers) UpdateProperty(w http.ResponseWriter, r *http.Request) {
 		SourceURL: req.SourceURL,
 		Latitude:  req.Latitude,
 		Longitude: req.Longitude,
-		Status:    req.Status,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "update_failed", err.Error())

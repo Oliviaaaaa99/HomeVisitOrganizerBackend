@@ -30,6 +30,7 @@ type unitResponse struct {
 	Beds          *int     `json:"beds,omitempty"`
 	Baths         *float64 `json:"baths,omitempty"`
 	AvailableFrom *string  `json:"available_from,omitempty"`
+	Status        string   `json:"status"`
 	CreatedAt     string   `json:"created_at"`
 	UpdatedAt     string   `json:"updated_at"`
 }
@@ -50,6 +51,7 @@ func toUnitResponse(u *store.Unit) unitResponse {
 		Beds:          u.Beds,
 		Baths:         u.Baths,
 		AvailableFrom: availStr,
+		Status:        u.Status,
 		CreatedAt:     u.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:     u.UpdatedAt.UTC().Format(time.RFC3339),
 	}
@@ -63,6 +65,7 @@ type updateUnitRequest struct {
 	Beds          *int     `json:"beds,omitempty"`
 	Baths         *float64 `json:"baths,omitempty"`
 	AvailableFrom *string  `json:"available_from,omitempty"`
+	Status        *string  `json:"status,omitempty"`
 }
 
 // UpdateUnit handles PATCH /v1/units/{id}.
@@ -81,6 +84,14 @@ func (h *Handlers) UpdateUnit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_body", err.Error())
 		return
 	}
+	if req.Status != nil {
+		switch *req.Status {
+		case "toured", "shortlisted", "rejected", "archived":
+		default:
+			writeError(w, http.StatusBadRequest, "invalid_status", "status must be toured/shortlisted/rejected/archived")
+			return
+		}
+	}
 	in := store.UpdateUnitInput{
 		ID:         id,
 		UserID:     userID,
@@ -90,6 +101,7 @@ func (h *Handlers) UpdateUnit(w http.ResponseWriter, r *http.Request) {
 		Sqft:       req.Sqft,
 		Beds:       req.Beds,
 		Baths:      req.Baths,
+		Status:     req.Status,
 	}
 	if req.AvailableFrom != nil {
 		if *req.AvailableFrom == "" {

@@ -13,6 +13,10 @@ import (
 )
 
 // Property mirrors a row in the properties table (without nested units/notes).
+//
+// Note: tour-state (toured / shortlisted / rejected / archived) lives on
+// the unit, not the property — see migration 005. The property is a pure
+// container (address, kind, source_url) with no decision state.
 type Property struct {
 	ID        uuid.UUID
 	UserID    uuid.UUID
@@ -21,7 +25,6 @@ type Property struct {
 	Longitude *float64
 	Kind      string
 	SourceURL *string
-	Status    string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -59,7 +62,7 @@ func (p *Properties) Create(ctx context.Context, in CreateInput) (*Property, err
 		)
 		RETURNING id, user_id, address,
 		          ST_Y(location::geometry), ST_X(location::geometry),
-		          kind, source_url, status, created_at, updated_at`
+		          kind, source_url, created_at, updated_at`
 	row := p.pool.QueryRow(ctx, q, in.UserID, in.Address, in.Latitude, in.Longitude, in.Kind, in.SourceURL)
 	return scanProperty(row)
 }
@@ -69,7 +72,7 @@ func (p *Properties) FindOwned(ctx context.Context, id, userID uuid.UUID) (*Prop
 	const q = `
 		SELECT id, user_id, address,
 		       ST_Y(location::geometry), ST_X(location::geometry),
-		       kind, source_url, status, created_at, updated_at
+		       kind, source_url, created_at, updated_at
 		FROM properties WHERE id = $1 AND user_id = $2`
 	row := p.pool.QueryRow(ctx, q, id, userID)
 	prop, err := scanProperty(row)
@@ -82,25 +85,27 @@ func (p *Properties) FindOwned(ctx context.Context, id, userID uuid.UUID) (*Prop
 // ListInput captures filter / pagination for GET /v1/properties.
 type ListInput struct {
 	UserID uuid.UUID
-	Status string // empty = any
 	Kind   string // empty = any
 	Limit  int
 	Offset int
 }
 
 // List returns the user's properties, filtered. Most-recent first.
+//
+// Filtering by status is gone — status is a unit-level concept now.
+// Callers that want "properties with at least one shortlisted unit"
+// should join through units client-side or via a dedicated query.
 func (p *Properties) List(ctx context.Context, in ListInput) ([]*Property, error) {
 	const q = `
 		SELECT id, user_id, address,
 		       ST_Y(location::geometry), ST_X(location::geometry),
-		       kind, source_url, status, created_at, updated_at
+		       kind, source_url, created_at, updated_at
 		FROM properties
 		WHERE user_id = $1
-		  AND ($2 = '' OR status = $2)
-		  AND ($3 = '' OR kind = $3)
+		  AND ($2 = '' OR kind = $2)
 		ORDER BY created_at DESC
-		LIMIT $4 OFFSET $5`
-	rows, err := p.pool.Query(ctx, q, in.UserID, in.Status, in.Kind, in.Limit, in.Offset)
+		LIMIT $3 OFFSET $4`
+	rows, err := p.pool.Query(ctx, q, in.UserID, in.Kind, in.Limit, in.Offset)
 	if err != nil {
 		return nil, fmt.Errorf("list properties: %w", err)
 	}
@@ -116,12 +121,6 @@ func (p *Properties) List(ctx context.Context, in ListInput) ([]*Property, error
 	return out, rows.Err()
 }
 
-// UpdateStatus transitions a property's status; returns the updated row.
-// Kept as a thin wrapper for handlers that only need to flip status.
-func (p *Properties) UpdateStatus(ctx context.Context, id, userID uuid.UUID, status string) (*Property, error) {
-	return p.Update(ctx, UpdateInput{ID: id, UserID: userID, Status: &status})
-}
-
 // UpdateInput is a partial-update payload. nil pointer = leave field as-is.
 type UpdateInput struct {
 	ID        uuid.UUID
@@ -131,7 +130,6 @@ type UpdateInput struct {
 	SourceURL *string
 	Latitude  *float64
 	Longitude *float64
-	Status    *string
 }
 
 // Update applies a partial update and returns the canonical row. Any nil
@@ -148,17 +146,15 @@ func (p *Properties) Update(ctx context.Context, in UpdateInput) (*Property, err
 		      THEN ST_SetSRID(ST_MakePoint($7::FLOAT8, $6::FLOAT8), 4326)::GEOGRAPHY
 		    ELSE location
 		  END,
-		  status     = COALESCE($8, status),
 		  updated_at = now()
 		WHERE id = $1 AND user_id = $2
 		RETURNING id, user_id, address,
 		          ST_Y(location::geometry), ST_X(location::geometry),
-		          kind, source_url, status, created_at, updated_at`
+		          kind, source_url, created_at, updated_at`
 	row := p.pool.QueryRow(ctx, q,
 		in.ID, in.UserID,
 		in.Address, in.Kind, in.SourceURL,
 		in.Latitude, in.Longitude,
-		in.Status,
 	)
 	prop, err := scanProperty(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -178,8 +174,8 @@ func (p *Properties) Update(ctx context.Context, in UpdateInput) (*Property, err
 //
 // Returns true if the property was found and deleted. S3 objects for the
 // deleted media are intentionally not removed here — the retention sweeper
-// (M4) will clean them up. Archive-as-status remains available via
-// PATCH /v1/properties/{id} {status: "archived"}.
+// (M4) will clean them up. Soft "archive" semantics live on the unit now —
+// PATCH /v1/units/{id} {status:"archived"}.
 func (p *Properties) HardDelete(ctx context.Context, id, userID uuid.UUID) (bool, error) {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
@@ -228,7 +224,7 @@ type scannable interface {
 
 func scanProperty(s scannable) (*Property, error) {
 	var p Property
-	if err := s.Scan(&p.ID, &p.UserID, &p.Address, &p.Latitude, &p.Longitude, &p.Kind, &p.SourceURL, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
+	if err := s.Scan(&p.ID, &p.UserID, &p.Address, &p.Latitude, &p.Longitude, &p.Kind, &p.SourceURL, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return &p, nil
