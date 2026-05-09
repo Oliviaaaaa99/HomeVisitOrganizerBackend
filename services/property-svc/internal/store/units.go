@@ -22,6 +22,7 @@ type Unit struct {
 	Beds          *int
 	Baths         *float64
 	AvailableFrom *time.Time
+	Status        string // 'toured' | 'shortlisted' | 'rejected' | 'archived'
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -53,13 +54,13 @@ func (u *Units) Create(ctx context.Context, in UnitInput) (*Unit, error) {
 	const q = `
 		INSERT INTO units (property_id, unit_label, unit_type, price_cents, sqft, beds, baths, available_from)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id, property_id, unit_label, unit_type, price_cents, sqft, beds, baths, available_from, created_at, updated_at`
+		RETURNING id, property_id, unit_label, unit_type, price_cents, sqft, beds, baths, available_from, status, created_at, updated_at`
 	row := u.pool.QueryRow(ctx, q,
 		in.PropertyID, in.UnitLabel, in.UnitType, in.PriceCents, in.Sqft, in.Beds, in.Baths, in.AvailableFrom)
 	var unit Unit
 	if err := row.Scan(&unit.ID, &unit.PropertyID, &unit.UnitLabel, &unit.UnitType,
 		&unit.PriceCents, &unit.Sqft, &unit.Beds, &unit.Baths, &unit.AvailableFrom,
-		&unit.CreatedAt, &unit.UpdatedAt); err != nil {
+		&unit.Status, &unit.CreatedAt, &unit.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("create unit: %w", err)
 	}
 	return &unit, nil
@@ -77,6 +78,7 @@ type UpdateUnitInput struct {
 	Beds          *int
 	Baths         *float64
 	AvailableFrom *time.Time
+	Status        *string
 }
 
 // Update applies a partial update; returns nil if not owned by user.
@@ -90,18 +92,20 @@ func (u *Units) Update(ctx context.Context, in UpdateUnitInput) (*Unit, error) {
 		  beds           = COALESCE($7, beds),
 		  baths          = COALESCE($8, baths),
 		  available_from = COALESCE($9, available_from),
+		  status         = COALESCE($10, status),
 		  updated_at     = now()
 		WHERE id = $1
 		  AND property_id IN (SELECT id FROM properties WHERE user_id = $2)
-		RETURNING id, property_id, unit_label, unit_type, price_cents, sqft, beds, baths, available_from, created_at, updated_at`
+		RETURNING id, property_id, unit_label, unit_type, price_cents, sqft, beds, baths, available_from, status, created_at, updated_at`
 	row := u.pool.QueryRow(ctx, q,
 		in.ID, in.UserID,
 		in.UnitLabel, in.UnitType, in.PriceCents,
-		in.Sqft, in.Beds, in.Baths, in.AvailableFrom)
+		in.Sqft, in.Beds, in.Baths, in.AvailableFrom,
+		in.Status)
 	var unit Unit
 	if err := row.Scan(&unit.ID, &unit.PropertyID, &unit.UnitLabel, &unit.UnitType,
 		&unit.PriceCents, &unit.Sqft, &unit.Beds, &unit.Baths, &unit.AvailableFrom,
-		&unit.CreatedAt, &unit.UpdatedAt); err != nil {
+		&unit.Status, &unit.CreatedAt, &unit.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
@@ -126,7 +130,7 @@ func (u *Units) Delete(ctx context.Context, id, userID uuid.UUID) (bool, error) 
 // ListByProperty returns all units of a property, oldest first (created_at asc).
 func (u *Units) ListByProperty(ctx context.Context, propertyID uuid.UUID) ([]*Unit, error) {
 	const q = `
-		SELECT id, property_id, unit_label, unit_type, price_cents, sqft, beds, baths, available_from, created_at, updated_at
+		SELECT id, property_id, unit_label, unit_type, price_cents, sqft, beds, baths, available_from, status, created_at, updated_at
 		FROM units WHERE property_id = $1 ORDER BY created_at ASC`
 	rows, err := u.pool.Query(ctx, q, propertyID)
 	if err != nil {
@@ -138,7 +142,7 @@ func (u *Units) ListByProperty(ctx context.Context, propertyID uuid.UUID) ([]*Un
 		var unit Unit
 		if err := rows.Scan(&unit.ID, &unit.PropertyID, &unit.UnitLabel, &unit.UnitType,
 			&unit.PriceCents, &unit.Sqft, &unit.Beds, &unit.Baths, &unit.AvailableFrom,
-			&unit.CreatedAt, &unit.UpdatedAt); err != nil {
+			&unit.Status, &unit.CreatedAt, &unit.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, &unit)
