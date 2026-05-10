@@ -141,6 +141,7 @@ func run() error {
 		r.Group(func(r chi.Router) {
 			r.Use(authx.Middleware(jwtVerifier))
 			r.Get("/users/me", h.Me)
+			r.Patch("/users/me", h.UpdateMe)
 			r.Post("/users/me/avatar:presign", h.PresignAvatar)
 			r.Post("/users/me/avatar:commit", h.CommitAvatar)
 			r.Delete("/users/me/avatar", h.DeleteAvatar)

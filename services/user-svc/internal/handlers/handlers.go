@@ -55,11 +55,28 @@ func (h *Handlers) Ready(w http.ResponseWriter, r *http.Request) {
 }
 
 type meResponse struct {
-	ID        string  `json:"id"`
-	Provider  string  `json:"provider"`
-	EmailHash *string `json:"email_hash,omitempty"`
-	AvatarURL *string `json:"avatar_url,omitempty"`
-	CreatedAt string  `json:"created_at"`
+	ID          string  `json:"id"`
+	Provider    string  `json:"provider"`
+	EmailHash   *string `json:"email_hash,omitempty"`
+	AvatarURL   *string `json:"avatar_url,omitempty"`
+	DisplayName *string `json:"display_name,omitempty"`
+	CreatedAt   string  `json:"created_at"`
+}
+
+func (h *Handlers) toMeResponse(user *store.User) meResponse {
+	var avatarURL *string
+	if user.AvatarS3Key != nil && *user.AvatarS3Key != "" && h.s3 != nil {
+		u := h.s3.PublicURL(*user.AvatarS3Key)
+		avatarURL = &u
+	}
+	return meResponse{
+		ID:          user.ID.String(),
+		Provider:    user.Provider,
+		EmailHash:   user.EmailHash,
+		AvatarURL:   avatarURL,
+		DisplayName: user.DisplayName,
+		CreatedAt:   user.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+	}
 }
 
 // Me returns the authenticated user. Requires auth middleware in front.
@@ -77,18 +94,39 @@ func (h *Handlers) Me(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user_gone"})
 		return
 	}
-	var avatarURL *string
-	if user.AvatarS3Key != nil && *user.AvatarS3Key != "" && h.s3 != nil {
-		u := h.s3.PublicURL(*user.AvatarS3Key)
-		avatarURL = &u
+	writeJSON(w, http.StatusOK, h.toMeResponse(user))
+}
+
+type updateMeRequest struct {
+	DisplayName *string `json:"display_name"`
+}
+
+// UpdateMe handles PATCH /v1/users/me — currently only display_name is
+// editable. Empty string clears the name (column → NULL).
+func (h *Handlers) UpdateMe(w http.ResponseWriter, r *http.Request) {
+	uid, ok := authedUUID(w, r)
+	if !ok {
+		return
 	}
-	writeJSON(w, http.StatusOK, meResponse{
-		ID:        user.ID.String(),
-		Provider:  user.Provider,
-		EmailHash: user.EmailHash,
-		AvatarURL: avatarURL,
-		CreatedAt: user.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
-	})
+	var req updateMeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
+		return
+	}
+	if req.DisplayName == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no_fields"})
+		return
+	}
+	user, err := h.users.SetDisplayName(r.Context(), uid, *req.DisplayName)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "save_failed"})
+		return
+	}
+	if user == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user_gone"})
+		return
+	}
+	writeJSON(w, http.StatusOK, h.toMeResponse(user))
 }
 
 type avatarPresignResponse struct {

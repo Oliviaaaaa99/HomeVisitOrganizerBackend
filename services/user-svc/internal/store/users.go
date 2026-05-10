@@ -22,6 +22,7 @@ type User struct {
 	Provider    string
 	EmailHash   *string
 	AvatarS3Key *string
+	DisplayName *string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -39,11 +40,11 @@ func NewUsers(pool *pgxpool.Pool) *Users {
 // FindByExternalID returns a user by (provider, external_id), or nil if not found.
 func (u *Users) FindByExternalID(ctx context.Context, provider, externalID string) (*User, error) {
 	const q = `
-		SELECT id, external_id, provider, email_hash, avatar_s3_key, created_at, updated_at
+		SELECT id, external_id, provider, email_hash, avatar_s3_key, display_name, created_at, updated_at
 		FROM users WHERE provider = $1 AND external_id = $2`
 	row := u.pool.QueryRow(ctx, q, provider, externalID)
 	var user User
-	err := row.Scan(&user.ID, &user.ExternalID, &user.Provider, &user.EmailHash, &user.AvatarS3Key, &user.CreatedAt, &user.UpdatedAt)
+	err := row.Scan(&user.ID, &user.ExternalID, &user.Provider, &user.EmailHash, &user.AvatarS3Key, &user.DisplayName, &user.CreatedAt, &user.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -56,11 +57,11 @@ func (u *Users) FindByExternalID(ctx context.Context, provider, externalID strin
 // FindByID returns a user by primary key, or nil if not found.
 func (u *Users) FindByID(ctx context.Context, id uuid.UUID) (*User, error) {
 	const q = `
-		SELECT id, external_id, provider, email_hash, avatar_s3_key, created_at, updated_at
+		SELECT id, external_id, provider, email_hash, avatar_s3_key, display_name, created_at, updated_at
 		FROM users WHERE id = $1`
 	row := u.pool.QueryRow(ctx, q, id)
 	var user User
-	err := row.Scan(&user.ID, &user.ExternalID, &user.Provider, &user.EmailHash, &user.AvatarS3Key, &user.CreatedAt, &user.UpdatedAt)
+	err := row.Scan(&user.ID, &user.ExternalID, &user.Provider, &user.EmailHash, &user.AvatarS3Key, &user.DisplayName, &user.CreatedAt, &user.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -82,8 +83,28 @@ func (u *Users) Upsert(ctx context.Context, provider, externalID string, emailHa
 		RETURNING id, external_id, provider, email_hash, avatar_s3_key, created_at, updated_at`
 	row := u.pool.QueryRow(ctx, q, provider, externalID, emailHash)
 	var user User
-	if err := row.Scan(&user.ID, &user.ExternalID, &user.Provider, &user.EmailHash, &user.AvatarS3Key, &user.CreatedAt, &user.UpdatedAt); err != nil {
+	if err := row.Scan(&user.ID, &user.ExternalID, &user.Provider, &user.EmailHash, &user.AvatarS3Key, &user.DisplayName, &user.CreatedAt, &user.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("upsert user: %w", err)
+	}
+	return &user, nil
+}
+
+// SetDisplayName updates the user's display name. Empty string clears it
+// (column → NULL). Returns the canonical row.
+func (u *Users) SetDisplayName(ctx context.Context, id uuid.UUID, name string) (*User, error) {
+	const q = `
+		UPDATE users
+		SET display_name = NULLIF($2, ''), updated_at = now()
+		WHERE id = $1
+		RETURNING id, external_id, provider, email_hash, avatar_s3_key, display_name, created_at, updated_at`
+	row := u.pool.QueryRow(ctx, q, id, name)
+	var user User
+	err := row.Scan(&user.ID, &user.ExternalID, &user.Provider, &user.EmailHash, &user.AvatarS3Key, &user.DisplayName, &user.CreatedAt, &user.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("set display name: %w", err)
 	}
 	return &user, nil
 }
