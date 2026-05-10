@@ -52,6 +52,7 @@ services:
       - ./services/user-svc/migrations:/migrations/user-svc:ro
       - ./services/property-svc/migrations:/migrations/property-svc:ro
       - ./services/media-svc/migrations:/migrations/media-svc:ro
+      - ./services/ranking-svc/migrations:/migrations/ranking-svc:ro
     profiles: ["tools"]
     entrypoint:
       - /bin/sh
@@ -59,7 +60,7 @@ services:
       - |
         set -e
         BASE='postgres://hvo:hvo_dev@postgres:5432/hvo?sslmode=disable'
-        for svc in user-svc property-svc media-svc; do
+        for svc in user-svc property-svc media-svc ranking-svc; do
           tbl=$$(echo "$$svc" | tr '-' '_')_migrations
           echo ">>> migrate $$svc (table=$$tbl)"
           /migrate -path=/migrations/$$svc \
@@ -123,6 +124,21 @@ services:
       S3_AUTO_CREATE_BUCKET: "true"
     ports:
       - "8083:8083"
+    profiles: ["app"]
+
+  ranking-svc:
+    build:
+      context: .
+      dockerfile: services/ranking-svc/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HTTP_ADDR: ":8084"
+      DATABASE_URL: postgres://hvo:hvo_dev@postgres:5432/hvo?sslmode=disable
+      JWT_SECRET: dev-secret-not-for-prod-12345678901234
+    ports:
+      - "8084:8084"
     profiles: ["app"]
 
 volumes:

@@ -58,6 +58,7 @@ build: ## Compile all services
 	cd services/user-svc && go build -o /tmp/hvo-user-svc ./cmd/server
 	cd services/property-svc && go build -o /tmp/hvo-property-svc ./cmd/server
 	cd services/media-svc && go build -o /tmp/hvo-media-svc ./cmd/server
+	cd services/ranking-svc && go build -o /tmp/hvo-ranking-svc ./cmd/server
 
 .PHONY: test
 test: ## Run all unit tests
@@ -65,6 +66,7 @@ test: ## Run all unit tests
 	cd services/user-svc && go test ./...
 	cd services/property-svc && go test ./...
 	cd services/media-svc && go test ./...
+	cd services/ranking-svc && go test ./...
 
 .PHONY: tidy
 tidy: ## Tidy all go modules
@@ -72,6 +74,7 @@ tidy: ## Tidy all go modules
 	cd services/user-svc && go mod tidy
 	cd services/property-svc && go mod tidy
 	cd services/media-svc && go mod tidy
+	cd services/ranking-svc && go mod tidy
 
 .PHONY: run-user
 run-user: ## Run user-svc against local infra
@@ -108,4 +111,12 @@ run-media: ## Run media-svc against local infra (uses LocalStack S3, iPhone-reac
 		AWS_S3_PATH_STYLE=true \
 		S3_BUCKET=hvo-media-dev \
 		S3_AUTO_CREATE_BUCKET=true \
+		go run ./cmd/server
+
+.PHONY: run-ranking
+run-ranking: ## Run ranking-svc against local infra
+	cd services/ranking-svc && \
+		HTTP_ADDR=':8084' \
+		JWT_SECRET='$(JWT_SECRET)' \
+		DATABASE_URL='$(POSTGRES_URL)' \
 		go run ./cmd/server
