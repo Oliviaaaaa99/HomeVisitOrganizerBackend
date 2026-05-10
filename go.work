@@ -5,4 +5,5 @@ use (
 	./services/user-svc
 	./services/property-svc
 	./services/media-svc
+	./services/ranking-svc
 )
