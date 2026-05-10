@@ -81,6 +81,7 @@ func run() error {
 		// is enforced inside the store via subquery on properties.user_id.
 		r.Patch("/units/{id}", h.UpdateUnit)
 		r.Delete("/units/{id}", h.DeleteUnit)
+		r.Post("/units/{id}/notes", h.CreateUnitNote)
 		r.Patch("/notes/{id}", h.UpdateNote)
 		r.Delete("/notes/{id}", h.DeleteNote)
 	})
