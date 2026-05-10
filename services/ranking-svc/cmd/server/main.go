@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Oliviaaaaa99/HomeVisitOrganizerBackend/services/ranking-svc/internal/clients"
 	"github.com/Oliviaaaaa99/HomeVisitOrganizerBackend/services/ranking-svc/internal/handlers"
 	"github.com/Oliviaaaaa99/HomeVisitOrganizerBackend/services/ranking-svc/internal/service"
 	"github.com/Oliviaaaaa99/HomeVisitOrganizerBackend/services/ranking-svc/internal/store"
@@ -54,7 +55,21 @@ func run() error {
 	defer pg.Close()
 
 	st := store.New(pg)
-	ranker := service.NewRanker(st)
+
+	// LLM ranker is opt-in: set ANTHROPIC_API_KEY to enable. NewClaude
+	// returns nil when the key is empty, and NewRanker treats nil as
+	// "use rule-based scoring".
+	claude := clients.NewClaude(
+		configx.String("ANTHROPIC_API_KEY", ""),
+		configx.String("ANTHROPIC_MODEL", ""),
+	)
+	if claude != nil {
+		slog.Info("claude ranker enabled")
+	} else {
+		slog.Info("claude ranker disabled — using rule-based fallback (set ANTHROPIC_API_KEY to enable)")
+	}
+
+	ranker := service.NewRanker(st, claude)
 	jwtVerifier := authx.NewVerifier([]byte(jwtSecret))
 	h := handlers.New(pg, st, ranker)
 
