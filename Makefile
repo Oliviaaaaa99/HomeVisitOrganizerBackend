@@ -53,6 +53,31 @@ migrate-media-down: ## Roll back the last media-svc migration
 		-database='postgres://hvo:hvo_dev@postgres:5432/hvo?sslmode=disable&x-migrations-table=media_svc_migrations' \
 		down 1
 
+# Apply migrations to a REMOTE database (Neon, RDS, etc). Reads DATABASE_URL
+# from the environment so secrets never land in the Makefile.
+#
+# Usage:
+#   DATABASE_URL='postgres://user:pass@ep-xyz.neon.tech/hvo?sslmode=require' \
+#     make migrate-remote
+#
+# Runs each service's migrations in turn into its own table
+# (foo_svc_migrations) so they don't collide.
+.PHONY: migrate-remote
+migrate-remote: ## Apply migrations against $$DATABASE_URL (Neon, RDS, …)
+	@if [ -z "$$DATABASE_URL" ]; then \
+		echo "DATABASE_URL is required (e.g. from Neon)"; exit 2; \
+	fi
+	@command -v migrate >/dev/null 2>&1 || { \
+		echo "migrate CLI not installed. Install: brew install golang-migrate"; exit 2; \
+	}
+	@set -e; for svc in user-svc property-svc media-svc ranking-svc; do \
+		tbl=$$(echo "$$svc" | tr '-' '_')_migrations; \
+		echo ">>> migrate $$svc (table=$$tbl)"; \
+		migrate -path "./services/$$svc/migrations" \
+			-database "$$DATABASE_URL&x-migrations-table=$$tbl" \
+			up; \
+	done
+
 .PHONY: build
 build: ## Compile all services
 	cd services/user-svc && go build -o /tmp/hvo-user-svc ./cmd/server
