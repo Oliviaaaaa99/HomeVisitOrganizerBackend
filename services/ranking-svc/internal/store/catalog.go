@@ -13,21 +13,21 @@ import (
 // property-svc tables directly (same DB) — same shared-data-plane pattern
 // media-svc uses to verify ownership.
 type UnitForRanking struct {
-	UnitID         uuid.UUID
-	PropertyID     uuid.UUID
-	Address        string
-	Kind           string
-	UnitLabel      *string
-	UnitType       string
-	PriceCents     *int64
-	Sqft           *int
-	Beds           *int
-	Baths          *float64
-	AvailableFrom  *time.Time
-	Status         string
-	PropertyLat    *float64
-	PropertyLng    *float64
-	PropertyURL    *string
+	UnitID        uuid.UUID
+	PropertyID    uuid.UUID
+	Address       string
+	Kind          string
+	UnitLabel     *string
+	UnitType      string
+	PriceCents    *int64
+	Sqft          *int
+	Beds          *int
+	Baths         *float64
+	AvailableFrom *time.Time
+	Status        string
+	PropertyLat   *float64
+	PropertyLng   *float64
+	PropertyURL   *string
 }
 
 // ListUnitsForUser returns every unit owned by the user, joined with its

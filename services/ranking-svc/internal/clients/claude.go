@@ -50,9 +50,9 @@ func NewClaude(apiKey, model string) *Claude {
 
 // MessagesRequest is the wire shape for a single-turn user message.
 type messagesRequest struct {
-	Model     string         `json:"model"`
-	MaxTokens int            `json:"max_tokens"`
-	System    string         `json:"system,omitempty"`
+	Model     string          `json:"model"`
+	MaxTokens int             `json:"max_tokens"`
+	System    string          `json:"system,omitempty"`
 	Messages  []claudeMessage `json:"messages"`
 }
 
