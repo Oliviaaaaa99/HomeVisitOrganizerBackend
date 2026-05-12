@@ -1,0 +1,21 @@
+# Fly.io app config for user-svc. Edit `app` if the name is taken on first
+# `fly launch` — names are globally unique on Fly.
+
+app = "hvo-user-svc"
+primary_region = "sjc"   # San Jose. Pick whatever's close to you.
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"   # keep warm — recruiter clicks shouldn't cold-start
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256
