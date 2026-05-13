@@ -125,16 +125,20 @@ Connection string goes into `fly secrets` later — **never commit it**.
 
 Run **once per service**. Each becomes its own Fly app with its own URL.
 
+> **Always run `fly` from the repo root.** Each service's Dockerfile needs
+> `shared/go-common/` in its build context, so the working directory has to
+> be the monorepo root, not the service directory. The fly.toml for each
+> service lives in `services/<svc>/fly.toml` and is selected with `--config`.
+
 ```bash
-# Pick a unique global name; fly will offer alternatives if taken.
-cd services/user-svc
-fly launch --copy-config --no-deploy
+# From repo root. Pick a unique global name; fly will offer alternatives if taken.
+fly launch --config services/user-svc/fly.toml --copy-config --no-deploy
 #   ? Choose an app name: hvo-user-svc-olivia
 #   ? Choose region: sjc
 #   ? Would you like to set up a Postgresql database now? No
 #   ? Would you like to deploy now? No
 
-fly secrets set \
+fly secrets set --config services/user-svc/fly.toml \
   DATABASE_URL='postgres://...neon.tech/hvo?sslmode=require' \
   JWT_SECRET="$(openssl rand -hex 32)" \
   AWS_REGION='us-west-2' \
@@ -142,15 +146,15 @@ fly secrets set \
   AWS_SECRET_ACCESS_KEY='...' \
   S3_BUCKET='hvo-prod'
 
-fly deploy
+fly deploy --config services/user-svc/fly.toml
 ```
 
 `fly deploy` builds the Docker image, ships it, and gives you a URL like
-`https://hvo-user-svc-olivia.fly.dev`. `fly logs` tails. `fly status` shows
-the running machine.
+`https://hvo-user-svc-olivia.fly.dev`. `fly logs --config services/user-svc/fly.toml`
+tails. `fly status --config services/user-svc/fly.toml` shows the running machine.
 
-Repeat for `property-svc`, `media-svc`, `ranking-svc`. The secret set for
-each varies:
+Repeat for `property-svc`, `media-svc`, `ranking-svc` (swap the `--config`
+path). The secret set for each varies:
 
 | Service | Required secrets |
 |---|---|
@@ -164,7 +168,8 @@ issued by user-svc.
 
 For media-svc, also set:
 ```bash
-fly secrets set AWS_S3_PATH_STYLE=false S3_AUTO_CREATE_BUCKET=false
+fly secrets set --config services/media-svc/fly.toml \
+  AWS_S3_PATH_STYLE=false S3_AUTO_CREATE_BUCKET=false
 ```
 (LocalStack quirks; in real AWS we don't path-style and don't auto-create.)
 

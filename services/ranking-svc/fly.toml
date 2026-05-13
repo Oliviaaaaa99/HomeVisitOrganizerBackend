@@ -2,7 +2,7 @@ app = "hvo-ranking-svc"
 primary_region = "sjc"
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = "services/ranking-svc/Dockerfile"
 
 [http_service]
   internal_port = 8084
