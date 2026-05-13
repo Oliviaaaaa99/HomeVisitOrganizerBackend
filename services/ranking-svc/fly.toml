@@ -1,4 +1,4 @@
-app = "hvo-ranking-svc"
+app = "hvo-ranking-svc-olivia"
 primary_region = "sjc"
 
 [build]
