@@ -2,7 +2,7 @@ app = "hvo-property-svc"
 primary_region = "sjc"
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = "services/property-svc/Dockerfile"
 
 [http_service]
   internal_port = 8082
