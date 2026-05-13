@@ -4,11 +4,9 @@
 app = "hvo-user-svc-olivia"
 primary_region = "sjc"   # San Jose. Pick whatever's close to you.
 
-[build]
-  # Path is relative to the repo root (where `fly` is invoked with --config),
-  # not to this fly.toml. The Dockerfile needs the parent's shared/go-common
-  # in its build context, so we always run fly from the repo root.
-  dockerfile = "services/user-svc/Dockerfile"
+# Dockerfile path is passed via CLI (`fly deploy --dockerfile ...`) so it can
+# be resolved from the repo root — the Dockerfile needs shared/go-common in
+# its build context.
 
 [http_service]
   internal_port = 8080

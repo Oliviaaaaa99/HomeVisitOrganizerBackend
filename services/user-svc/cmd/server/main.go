@@ -110,14 +110,16 @@ func run() error {
 
 	auth := service.NewAuth(idps, users, refresh, jwtIssuer, refreshTTL)
 
-	// Optional S3 client for avatars. If S3_BUCKET isn't set, avatar endpoints
-	// return 503 — useful so dev runs without LocalStack still come up cleanly.
+	// Optional S3 client for avatars. If no bucket is set, avatar endpoints
+	// return 503 — useful so dev runs without object storage still come up
+	// cleanly. We accept BUCKET_NAME (Tigris convention on Fly) or S3_BUCKET
+	// (LocalStack-era), same for the endpoint URL.
 	var s3Client *clients.S3
-	if bucket := configx.String("S3_BUCKET", ""); bucket != "" {
+	if bucket := configx.StringFirst("", "BUCKET_NAME", "S3_BUCKET"); bucket != "" {
 		s3Cfg := clients.Config{
 			Region:       configx.String("AWS_REGION", "us-east-1"),
 			Bucket:       bucket,
-			Endpoint:     configx.String("AWS_ENDPOINT_URL", ""),
+			Endpoint:     configx.StringFirst("", "AWS_ENDPOINT_URL_S3", "AWS_ENDPOINT_URL"),
 			AccessKey:    configx.String("AWS_ACCESS_KEY_ID", ""),
 			SecretKey:    configx.String("AWS_SECRET_ACCESS_KEY", ""),
 			UsePathStyle: configx.String("AWS_S3_PATH_STYLE", "false") == "true",
@@ -129,7 +131,7 @@ func run() error {
 		}
 		slog.Info("avatar uploads enabled", "bucket", bucket)
 	} else {
-		slog.Info("S3_BUCKET not set — avatar endpoints disabled")
+		slog.Info("no S3 bucket configured — avatar endpoints disabled")
 	}
 
 	h := handlers.New(pg, rdb, auth, users, s3Client)
