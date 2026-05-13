@@ -40,16 +40,23 @@ func (h *Handlers) Health(w http.ResponseWriter, r *http.Request) {
 
 // Ready is the readiness probe — verifies Postgres and Redis connectivity.
 func (h *Handlers) Ready(w http.ResponseWriter, r *http.Request) {
-	resp := map[string]string{"postgres": "ok", "redis": "ok"}
+	resp := map[string]string{"postgres": "ok"}
 	status := http.StatusOK
 
 	if err := h.pg.Ping(r.Context()); err != nil {
 		resp["postgres"] = err.Error()
 		status = http.StatusServiceUnavailable
 	}
-	if err := h.rdb.Ping(r.Context()).Err(); err != nil {
-		resp["redis"] = err.Error()
-		status = http.StatusServiceUnavailable
+	// Redis is optional. Only report on it when a client was wired up.
+	if h.rdb != nil {
+		if err := h.rdb.Ping(r.Context()).Err(); err != nil {
+			resp["redis"] = err.Error()
+			status = http.StatusServiceUnavailable
+		} else {
+			resp["redis"] = "ok"
+		}
+	} else {
+		resp["redis"] = "disabled"
 	}
 	writeJSON(w, status, resp)
 }
