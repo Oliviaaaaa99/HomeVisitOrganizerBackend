@@ -45,7 +45,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	redisURL := configx.String("REDIS_URL", "redis://localhost:6379/0")
+	// Redis is optional — set REDIS_URL to enable, leave it blank (or unset)
+	// and the service skips the client entirely. We only use Redis for the
+	// readyz probe today; tokens / sessions live in Postgres.
+	redisURL := configx.String("REDIS_URL", "")
 
 	jwtSecret, err := configx.MustString("JWT_SECRET")
 	if err != nil {
@@ -66,11 +69,16 @@ func run() error {
 	}
 	defer pg.Close()
 
-	rdb, err := redisClient(ctx, redisURL)
-	if err != nil {
-		return err
+	var rdb *redis.Client
+	if redisURL != "" {
+		rdb, err = redisClient(ctx, redisURL)
+		if err != nil {
+			return err
+		}
+		defer rdb.Close()
+	} else {
+		slog.Info("REDIS_URL not set — Redis client disabled")
 	}
-	defer rdb.Close()
 
 	// Auth scaffolding
 	users := store.NewUsers(pg)
