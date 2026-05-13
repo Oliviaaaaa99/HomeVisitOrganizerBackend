@@ -46,10 +46,13 @@ func run() error {
 		return err
 	}
 
+	// Tigris (Fly's managed S3-compatible storage) sets BUCKET_NAME and
+	// AWS_ENDPOINT_URL_S3; our LocalStack dev setup uses S3_BUCKET and
+	// AWS_ENDPOINT_URL. Accept either so the same binary works in both.
 	s3Cfg := clients.Config{
 		Region:       configx.String("AWS_REGION", "us-east-1"),
-		Bucket:       configx.String("S3_BUCKET", "hvo-media-dev"),
-		Endpoint:     configx.String("AWS_ENDPOINT_URL", ""),
+		Bucket:       configx.StringFirst("hvo-media-dev", "BUCKET_NAME", "S3_BUCKET"),
+		Endpoint:     configx.StringFirst("", "AWS_ENDPOINT_URL_S3", "AWS_ENDPOINT_URL"),
 		AccessKey:    configx.String("AWS_ACCESS_KEY_ID", ""),
 		SecretKey:    configx.String("AWS_SECRET_ACCESS_KEY", ""),
 		UsePathStyle: configx.String("AWS_S3_PATH_STYLE", "false") == "true",

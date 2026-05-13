@@ -1,8 +1,8 @@
 app = "hvo-ranking-svc-olivia"
 primary_region = "sjc"
 
-[build]
-  dockerfile = "services/ranking-svc/Dockerfile"
+# Dockerfile path is passed via CLI (`fly deploy --dockerfile ...`) so it can
+# be resolved from the repo root.
 
 [http_service]
   internal_port = 8084
