@@ -1,4 +1,4 @@
-app = "hvo-media-svc"
+app = "hvo-media-svc-olivia"
 primary_region = "sjc"
 
 [build]
