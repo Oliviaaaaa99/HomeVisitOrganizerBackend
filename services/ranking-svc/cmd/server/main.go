@@ -74,7 +74,7 @@ func run() error {
 	h := handlers.New(pg, st, ranker)
 
 	r := chi.NewRouter()
-	r.Use(httpx.RequestID, httpx.Logger, httpx.Recoverer)
+	r.Use(httpx.CORS(configx.String("CORS_ALLOWED_ORIGIN", "*")), httpx.RequestID, httpx.Logger, httpx.Recoverer)
 
 	r.Get("/healthz", h.Health)
 	r.Get("/readyz", h.Ready)
