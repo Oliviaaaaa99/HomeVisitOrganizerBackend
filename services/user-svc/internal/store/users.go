@@ -80,7 +80,7 @@ func (u *Users) Upsert(ctx context.Context, provider, externalID string, emailHa
 		ON CONFLICT (provider, external_id) DO UPDATE
 		  SET email_hash = COALESCE(NULLIF(EXCLUDED.email_hash, ''), users.email_hash),
 		      updated_at = now()
-		RETURNING id, external_id, provider, email_hash, avatar_s3_key, created_at, updated_at`
+		RETURNING id, external_id, provider, email_hash, avatar_s3_key, display_name, created_at, updated_at`
 	row := u.pool.QueryRow(ctx, q, provider, externalID, emailHash)
 	var user User
 	if err := row.Scan(&user.ID, &user.ExternalID, &user.Provider, &user.EmailHash, &user.AvatarS3Key, &user.DisplayName, &user.CreatedAt, &user.UpdatedAt); err != nil {
