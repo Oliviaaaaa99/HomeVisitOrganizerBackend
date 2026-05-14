@@ -155,6 +155,27 @@ func (s *S3) PresignPut(ctx context.Context, key string) (string, error) {
 	return req.URL, nil
 }
 
+// presignGetTTL is the lifetime of GET URLs we return for image display.
+// Longer than PUT (which is one-shot at upload time) — clients may keep a
+// screen open and re-render images while scrolling. 1h is long enough that
+// the iOS image cache won't expire mid-session, short enough that a leaked
+// URL stops working within a session.
+const presignGetTTL = 1 * time.Hour
+
+// PresignGet returns a short-lived signed URL for fetching an object. Used
+// instead of PublicURL when the bucket is private and we don't want to expose
+// objects directly.
+func (s *S3) PresignGet(ctx context.Context, key string) (string, error) {
+	req, err := s.presign.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	}, s3.WithPresignExpires(presignGetTTL))
+	if err != nil {
+		return "", fmt.Errorf("presign get: %w", err)
+	}
+	return req.URL, nil
+}
+
 // HeadObject returns nil if the object exists, error otherwise. Used by the
 // commit endpoint to confirm the client actually uploaded what they claim.
 func (s *S3) HeadObject(ctx context.Context, key string) error {

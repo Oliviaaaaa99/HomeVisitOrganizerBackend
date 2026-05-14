@@ -240,12 +240,20 @@ func (m *Media) ListByUnit(ctx context.Context, unitID, userID uuid.UUID) ([]Med
 	}
 	out := make([]MediaListItem, 0, len(rows))
 	for _, r := range rows {
+		// Presigned GET URL — Tigris/S3 bucket is private, so a direct URL
+		// would 403. The signature expires after presignGetTTL (1h) which is
+		// long enough for the iOS image cache to hold each picture across a
+		// normal session.
+		url, err := m.s3.PresignGet(ctx, r.S3Key)
+		if err != nil {
+			return nil, fmt.Errorf("presign media %q: %w", r.ID, err)
+		}
 		out = append(out, MediaListItem{
 			ID:         r.ID.String(),
 			UnitID:     r.UnitID.String(),
 			MediaType:  r.MediaType,
 			S3Key:      r.S3Key,
-			URL:        m.s3.PublicURL(r.S3Key),
+			URL:        url,
 			DurationS:  r.DurationS,
 			Caption:    r.Caption,
 			CapturedAt: r.CapturedAt,
