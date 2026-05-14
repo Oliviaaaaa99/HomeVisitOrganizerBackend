@@ -11,9 +11,11 @@ primary_region = "sjc"   # San Jose. Pick whatever's close to you.
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "off"   # keep warm — recruiter clicks shouldn't cold-start
+  # Scale-to-zero: machines stop when idle and auto-start on first request.
+  # Cold start ~1-2s, which is fine for a demo and keeps idle cost at ~$0.
+  auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 1
+  min_machines_running = 0
   processes = ["app"]
 
 [[vm]]
