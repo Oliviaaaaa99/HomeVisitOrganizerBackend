@@ -108,7 +108,16 @@ func run() error {
 		slog.Info("google id-token verifier enabled", "audience", googleAudience)
 	}
 
-	auth := service.NewAuth(idps, users, refresh, jwtIssuer, refreshTTL)
+	// Optional sign-in allowlist for the public demo. If ALLOWED_EXTERNAL_IDS
+	// is set (comma-separated), only those external_ids may exchange — keeps
+	// the deployed demo from being writable by anyone with the URL. Unset =
+	// allow everyone, matches local dev behavior.
+	allowlist := parseAllowlist(configx.String("ALLOWED_EXTERNAL_IDS", ""))
+	if len(allowlist) > 0 {
+		slog.Info("sign-in allowlist enabled", "size", len(allowlist))
+	}
+
+	auth := service.NewAuth(idps, users, refresh, jwtIssuer, refreshTTL, allowlist)
 
 	// Optional S3 client for avatars. If no bucket is set, avatar endpoints
 	// return 503 — useful so dev runs without object storage still come up
@@ -180,6 +189,26 @@ func run() error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// parseAllowlist turns "a@x.com, B@y.com,c@z.com" into a lower-cased set.
+// Empty input returns nil so Auth.Exchange skips the check entirely.
+func parseAllowlist(raw string) map[string]struct{} {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	out := make(map[string]struct{})
+	for _, part := range strings.Split(raw, ",") {
+		id := strings.ToLower(strings.TrimSpace(part))
+		if id != "" {
+			out[id] = struct{}{}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func redisClient(ctx context.Context, url string) (*redis.Client, error) {
