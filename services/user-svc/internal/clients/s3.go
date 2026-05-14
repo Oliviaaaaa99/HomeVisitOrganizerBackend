@@ -130,5 +130,23 @@ func (s *S3) PublicURL(key string) string {
 	return fmt.Sprintf("%s/%s/%s", s.endpoint, s.bucket, key)
 }
 
+// presignGetTTL — see media-svc's matching constant. 1h is long enough for an
+// iOS session, short enough that a leaked URL stops working before the user
+// closes the app.
+const presignGetTTL = 1 * time.Hour
+
+// PresignGet returns a short-lived signed URL for fetching the avatar. Use
+// this instead of PublicURL when the bucket is private.
+func (s *S3) PresignGet(ctx context.Context, key string) (string, error) {
+	req, err := s.presign.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	}, s3.WithPresignExpires(presignGetTTL))
+	if err != nil {
+		return "", fmt.Errorf("presign get: %w", err)
+	}
+	return req.URL, nil
+}
+
 // PresignTTL returns the configured presign expiry.
 func (s *S3) PresignTTL() time.Duration { return s.presignTTL }

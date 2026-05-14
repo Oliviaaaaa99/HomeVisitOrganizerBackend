@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"path"
 	"time"
@@ -70,17 +71,28 @@ type meResponse struct {
 	CreatedAt   string  `json:"created_at"`
 }
 
-func (h *Handlers) toMeResponse(user *store.User) meResponse {
-	var avatarURL *string
-	if user.AvatarS3Key != nil && *user.AvatarS3Key != "" && h.s3 != nil {
-		u := h.s3.PublicURL(*user.AvatarS3Key)
-		avatarURL = &u
+// avatarURL returns a short-lived presigned GET URL for the user's avatar, or
+// nil if they have no avatar, S3 isn't configured, or presigning fails. We
+// treat presign failure as "no avatar" rather than failing the whole request
+// — it lets /me keep working when the bucket is briefly unreachable.
+func (h *Handlers) avatarURL(ctx context.Context, user *store.User) *string {
+	if user.AvatarS3Key == nil || *user.AvatarS3Key == "" || h.s3 == nil {
+		return nil
 	}
+	u, err := h.s3.PresignGet(ctx, *user.AvatarS3Key)
+	if err != nil {
+		slog.WarnContext(ctx, "presign avatar get failed", "err", err, "key", *user.AvatarS3Key)
+		return nil
+	}
+	return &u
+}
+
+func (h *Handlers) toMeResponse(ctx context.Context, user *store.User) meResponse {
 	return meResponse{
 		ID:          user.ID.String(),
 		Provider:    user.Provider,
 		EmailHash:   user.EmailHash,
-		AvatarURL:   avatarURL,
+		AvatarURL:   h.avatarURL(ctx, user),
 		DisplayName: user.DisplayName,
 		CreatedAt:   user.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 	}
@@ -101,7 +113,7 @@ func (h *Handlers) Me(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user_gone"})
 		return
 	}
-	writeJSON(w, http.StatusOK, h.toMeResponse(user))
+	writeJSON(w, http.StatusOK, h.toMeResponse(r.Context(), user))
 }
 
 type updateMeRequest struct {
@@ -133,7 +145,7 @@ func (h *Handlers) UpdateMe(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user_gone"})
 		return
 	}
-	writeJSON(w, http.StatusOK, h.toMeResponse(user))
+	writeJSON(w, http.StatusOK, h.toMeResponse(r.Context(), user))
 }
 
 type avatarPresignResponse struct {
@@ -210,9 +222,18 @@ func (h *Handlers) CommitAvatar(w http.ResponseWriter, r *http.Request) {
 		// to be cleaned up by the M4 retention sweeper later.
 		_ = deleteBackground(r.Context(), h.s3, *oldKey)
 	}
+	avatarURL, err := h.s3.PresignGet(r.Context(), req.S3Key)
+	if err != nil {
+		// The object exists (we HeadObject'd above) and the DB write succeeded,
+		// so the avatar is committed — we just can't sign a URL right now. Tell
+		// the client the key; the next /me call will retry the presign.
+		slog.WarnContext(r.Context(), "presign avatar get failed after commit", "err", err)
+		writeJSON(w, http.StatusOK, map[string]string{"s3_key": req.S3Key})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{
 		"s3_key":     req.S3Key,
-		"avatar_url": h.s3.PublicURL(req.S3Key),
+		"avatar_url": avatarURL,
 	})
 }
 
