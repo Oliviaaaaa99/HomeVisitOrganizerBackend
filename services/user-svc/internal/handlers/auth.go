@@ -36,6 +36,15 @@ func (h *Handlers) Exchange(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_id_token"})
 			return
 		}
+		if errors.Is(err, service.ErrNotAllowed) {
+			// Friendly demo-gate response. 403 not 401 because the token may
+			// have been perfectly valid — we just don't allow that subject.
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error":  "not_allowed",
+				"detail": "This demo is invitation-only. Contact the developer for access.",
+			})
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "exchange_failed", "detail": err.Error()})
 		return
 	}
