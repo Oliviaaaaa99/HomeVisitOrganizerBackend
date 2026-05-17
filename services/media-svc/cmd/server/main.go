@@ -79,6 +79,18 @@ func run() error {
 		slog.Info("ensured s3 bucket", "bucket", s3Cfg.Bucket)
 	}
 
+	// Apply CORS to the bucket on every boot. Tigris virtual-hosted URLs
+	// (where browser uploads land) don't inherit the org-level CORS, so we
+	// have to set it bucket-side. Idempotent — PutBucketCors fully replaces
+	// the existing policy. Best-effort: if it fails (transient network, etc.)
+	// we keep booting; the worst case is one cold start where web uploads
+	// don't work and they retry.
+	if err := s3.EnsureBucketCors(ctx); err != nil {
+		slog.Warn("EnsureBucketCors failed — web uploads may be blocked by browser CORS until next boot", "err", err)
+	} else {
+		slog.Info("ensured s3 bucket CORS", "bucket", s3Cfg.Bucket)
+	}
+
 	owner := store.NewOwnership(pg)
 	media := store.NewMedia(pg)
 	svc := service.NewMedia(owner, media, s3)

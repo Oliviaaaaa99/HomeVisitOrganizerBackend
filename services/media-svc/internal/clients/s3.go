@@ -120,6 +120,32 @@ func (s *S3) EnsureBucket(ctx context.Context) error {
 	return nil
 }
 
+// EnsureBucketCors applies a CORS policy that lets the browser-based web
+// client PUT directly to the bucket and read object URLs cross-origin. iOS
+// native networking doesn't enforce CORS so this is purely for the React
+// Native Web build. Idempotent — Tigris and S3 both treat PutBucketCors as
+// a full replace, so re-running just overwrites with the same value.
+func (s *S3) EnsureBucketCors(ctx context.Context) error {
+	_, err := s.cli.PutBucketCors(ctx, &s3.PutBucketCorsInput{
+		Bucket: aws.String(s.bucket),
+		CORSConfiguration: &types.CORSConfiguration{
+			CORSRules: []types.CORSRule{
+				{
+					AllowedMethods: []string{"GET", "PUT", "HEAD"},
+					AllowedOrigins: []string{"*"},
+					AllowedHeaders: []string{"*"},
+					ExposeHeaders:  []string{"ETag"},
+					MaxAgeSeconds:  aws.Int32(3600),
+				},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("put bucket cors: %w", err)
+	}
+	return nil
+}
+
 // PublicURL builds a direct-GET URL for an object key. Only meaningful when
 // the bucket has a public-read policy (true in dev via LocalStack; in prod
 // this should not be called — use a CloudFront/signed-cookie strategy).
