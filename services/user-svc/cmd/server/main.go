@@ -108,16 +108,17 @@ func run() error {
 		slog.Info("google id-token verifier enabled", "audience", googleAudience)
 	}
 
-	// Optional sign-in allowlist for the public demo. If ALLOWED_EXTERNAL_IDS
-	// is set (comma-separated), only those external_ids may exchange — keeps
-	// the deployed demo from being writable by anyone with the URL. Unset =
-	// allow everyone, matches local dev behavior.
-	allowlist := parseAllowlist(configx.String("ALLOWED_EXTERNAL_IDS", ""))
-	if len(allowlist) > 0 {
-		slog.Info("sign-in allowlist enabled", "size", len(allowlist))
+	// Per-user demo gate. ALLOWED_USERS = "email1:code1,email2:code2,...".
+	// Unset / empty = no gate (local docker-compose behavior unchanged).
+	// Set = clients must provide both a matching email and that email's
+	// passcode — so a leaked code only compromises one user, not the whole
+	// demo. See scripts/invite.sh for the day-to-day workflow.
+	userPasscodes := parseAllowedUsers(configx.String("ALLOWED_USERS", ""))
+	if len(userPasscodes) > 0 {
+		slog.Info("sign-in gate enabled", "users", len(userPasscodes))
 	}
 
-	auth := service.NewAuth(idps, users, refresh, jwtIssuer, refreshTTL, allowlist)
+	auth := service.NewAuth(idps, users, refresh, jwtIssuer, refreshTTL, userPasscodes)
 
 	// Optional S3 client for avatars. If no bucket is set, avatar endpoints
 	// return 503 — useful so dev runs without object storage still come up
@@ -191,18 +192,30 @@ func run() error {
 	return srv.Shutdown(shutdownCtx)
 }
 
-// parseAllowlist turns "a@x.com, B@y.com,c@z.com" into a lower-cased set.
-// Empty input returns nil so Auth.Exchange skips the check entirely.
-func parseAllowlist(raw string) map[string]struct{} {
+// parseAllowedUsers turns "a@x.com:abc, b@y.com:def" into a map of
+// lower-cased external_id → passcode. Empty input returns nil so Exchange
+// skips the gate entirely. Malformed entries (no colon, empty key) are
+// silently dropped — surfacing them as errors would prevent service boot,
+// and we prefer "fail to gate" over "fail to start" for a demo.
+func parseAllowedUsers(raw string) map[string]string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
 	}
-	out := make(map[string]struct{})
+	out := make(map[string]string)
 	for _, part := range strings.Split(raw, ",") {
-		id := strings.ToLower(strings.TrimSpace(part))
-		if id != "" {
-			out[id] = struct{}{}
+		entry := strings.TrimSpace(part)
+		if entry == "" {
+			continue
+		}
+		i := strings.Index(entry, ":")
+		if i <= 0 || i == len(entry)-1 {
+			continue
+		}
+		id := strings.ToLower(strings.TrimSpace(entry[:i]))
+		code := strings.TrimSpace(entry[i+1:])
+		if id != "" && code != "" {
+			out[id] = code
 		}
 	}
 	if len(out) == 0 {

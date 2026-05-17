@@ -4,6 +4,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -24,9 +25,10 @@ type TokenPair struct {
 	UserID           string    `json:"user_id"`
 }
 
-// ErrNotAllowed signals the verified identity isn't in the configured
-// allowlist. Used to gate the demo deployment to a known set of testers.
-var ErrNotAllowed = errors.New("identity not in allowlist")
+// ErrInvalidCredentials signals either an unknown external_id or a wrong
+// passcode for an otherwise-valid external_id. Same error for both cases so
+// strangers can't tell whether they guessed the email right.
+var ErrInvalidCredentials = errors.New("invalid email or passcode")
 
 // Auth is the orchestrator for the auth flow: id_token verification, user
 // upsert, JWT signing, refresh-token rotation.
@@ -36,36 +38,42 @@ type Auth struct {
 	refresh    *store.RefreshTokens
 	jwtIssuer  *authx.Issuer
 	refreshTTL time.Duration
-	// Nil = allow everyone (the original behavior). Non-nil and non-empty =
-	// only the listed external_ids may exchange. Lookup keys are lower-cased
-	// to keep "Email@Example.com" and "email@example.com" matchable.
-	allowlist map[string]struct{}
+	// Per-user passcode map for the demo gate. Nil/empty = no gate (original
+	// behavior, keeps local docker-compose runs frictionless). Keys are
+	// lower-cased external_ids; values are the matching passcodes (plain text
+	// — Fly encrypts secrets at rest, threat model docs see PR description).
+	userPasscodes map[string]string
 }
 
-// NewAuth wires the auth service. Pass a nil or empty allowlist to allow any
-// verified identity (original demo behavior).
-func NewAuth(idps *clients.Registry, users *store.Users, refresh *store.RefreshTokens, jwtIssuer *authx.Issuer, refreshTTL time.Duration, allowlist map[string]struct{}) *Auth {
+// NewAuth wires the auth service. Pass a nil/empty userPasscodes map to skip
+// the demo gate (original behavior for local dev).
+func NewAuth(idps *clients.Registry, users *store.Users, refresh *store.RefreshTokens, jwtIssuer *authx.Issuer, refreshTTL time.Duration, userPasscodes map[string]string) *Auth {
 	return &Auth{
-		idps:       idps,
-		users:      users,
-		refresh:    refresh,
-		jwtIssuer:  jwtIssuer,
-		refreshTTL: refreshTTL,
-		allowlist:  allowlist,
+		idps:          idps,
+		users:         users,
+		refresh:       refresh,
+		jwtIssuer:     jwtIssuer,
+		refreshTTL:    refreshTTL,
+		userPasscodes: userPasscodes,
 	}
 }
 
 // Exchange takes a provider id_token, verifies it, finds-or-creates the local
-// user, and returns a fresh access + refresh token pair. Returns ErrNotAllowed
-// if an allowlist is configured and the verified external_id isn't in it.
-func (a *Auth) Exchange(ctx context.Context, provider, idToken, userAgent, ipAddr string) (*TokenPair, error) {
+// user, and returns a fresh access + refresh token pair.
+//
+// When userPasscodes is configured, the verified external_id must be in the
+// map AND the request passcode must match that user's entry. Same error in
+// both failure modes so attackers can't distinguish "wrong email" from
+// "wrong code".
+func (a *Auth) Exchange(ctx context.Context, provider, idToken, passcode, userAgent, ipAddr string) (*TokenPair, error) {
 	identity, err := a.idps.Verify(ctx, provider, idToken)
 	if err != nil {
 		return nil, fmt.Errorf("verify id token: %w", err)
 	}
-	if len(a.allowlist) > 0 {
-		if _, ok := a.allowlist[strings.ToLower(identity.ExternalID)]; !ok {
-			return nil, ErrNotAllowed
+	if len(a.userPasscodes) > 0 {
+		expected, ok := a.userPasscodes[strings.ToLower(identity.ExternalID)]
+		if !ok || subtle.ConstantTimeCompare([]byte(passcode), []byte(expected)) != 1 {
+			return nil, ErrInvalidCredentials
 		}
 	}
 	user, err := a.users.Upsert(ctx, identity.Provider, identity.ExternalID, identity.EmailHash)
