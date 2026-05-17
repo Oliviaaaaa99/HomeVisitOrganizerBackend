@@ -33,25 +33,16 @@ func (h *Handlers) Exchange(w http.ResponseWriter, r *http.Request) {
 
 	pair, err := h.auth.Exchange(r.Context(), req.Provider, req.IDToken, req.Passcode, r.UserAgent(), clientIP(r))
 	if err != nil {
-		if errors.Is(err, service.ErrBadPasscode) {
-			// Don't tell the caller anything about provider/allowlist — they
-			// haven't even cleared the gate.
-			writeJSON(w, http.StatusForbidden, map[string]string{
-				"error":  "bad_passcode",
-				"detail": "Demo passcode is required and must match.",
-			})
-			return
-		}
 		if errors.Is(err, clients.ErrInvalidToken) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_id_token"})
 			return
 		}
-		if errors.Is(err, service.ErrNotAllowed) {
-			// Friendly demo-gate response. 403 not 401 because the token may
-			// have been perfectly valid — we just don't allow that subject.
+		if errors.Is(err, service.ErrInvalidCredentials) {
+			// Same error message whether the email is unknown or the passcode
+			// is wrong — don't help attackers enumerate valid emails.
 			writeJSON(w, http.StatusForbidden, map[string]string{
-				"error":  "not_allowed",
-				"detail": "This demo is invitation-only. Contact the developer for access.",
+				"error":  "invalid_credentials",
+				"detail": "Email or passcode is incorrect.",
 			})
 			return
 		}
