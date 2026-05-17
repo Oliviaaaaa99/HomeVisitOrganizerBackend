@@ -36,8 +36,10 @@ touch "$state_file"
 chmod 600 "$state_file"
 
 # ---- generate code ----------------------------------------------------------
-# 12 alphanumeric chars from /dev/urandom. ~71 bits of entropy.
-code=$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 12)
+# 6 alphanumeric chars from /dev/urandom. ~35 bits of entropy — at ~100
+# req/sec to /auth/exchange that's ~18 years to brute force, which is fine
+# for a small portfolio demo behind Fly's network rate-limiting.
+code=$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 6)
 
 # ---- update local file ------------------------------------------------------
 # Remove any existing line for this email, then append fresh.
