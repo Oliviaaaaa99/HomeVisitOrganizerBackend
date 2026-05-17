@@ -39,7 +39,11 @@ chmod 600 "$state_file"
 # 6 alphanumeric chars from /dev/urandom. ~35 bits of entropy — at ~100
 # req/sec to /auth/exchange that's ~18 years to brute force, which is fine
 # for a small portfolio demo behind Fly's network rate-limiting.
-code=$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 6)
+#
+# The subshell explicitly disables `pipefail`: `head -c 6` closes the pipe
+# after reading enough bytes, which sends SIGPIPE to `tr`. With pipefail
+# enabled on the outer script that bubbles up as exit 141.
+code=$(set +o pipefail; LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 6)
 
 # ---- update local file ------------------------------------------------------
 # Remove any existing line for this email, then append fresh.
