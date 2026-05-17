@@ -4,6 +4,7 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -28,6 +29,11 @@ type TokenPair struct {
 // allowlist. Used to gate the demo deployment to a known set of testers.
 var ErrNotAllowed = errors.New("identity not in allowlist")
 
+// ErrBadPasscode signals the demo passcode is required but missing or wrong.
+// Checked before any provider verification, so it doubles as a brake on
+// strangers fuzzing the exchange endpoint.
+var ErrBadPasscode = errors.New("bad passcode")
+
 // Auth is the orchestrator for the auth flow: id_token verification, user
 // upsert, JWT signing, refresh-token rotation.
 type Auth struct {
@@ -36,29 +42,45 @@ type Auth struct {
 	refresh    *store.RefreshTokens
 	jwtIssuer  *authx.Issuer
 	refreshTTL time.Duration
+	// Empty = no passcode required (original behavior). Non-empty = clients
+	// must include a matching "passcode" field in the exchange request body.
+	passcode string
 	// Nil = allow everyone (the original behavior). Non-nil and non-empty =
 	// only the listed external_ids may exchange. Lookup keys are lower-cased
 	// to keep "Email@Example.com" and "email@example.com" matchable.
 	allowlist map[string]struct{}
 }
 
-// NewAuth wires the auth service. Pass a nil or empty allowlist to allow any
-// verified identity (original demo behavior).
-func NewAuth(idps *clients.Registry, users *store.Users, refresh *store.RefreshTokens, jwtIssuer *authx.Issuer, refreshTTL time.Duration, allowlist map[string]struct{}) *Auth {
+// NewAuth wires the auth service. Pass empty passcode and/or nil allowlist
+// to skip those checks (original demo behavior, which we keep for local
+// docker-compose runs).
+func NewAuth(idps *clients.Registry, users *store.Users, refresh *store.RefreshTokens, jwtIssuer *authx.Issuer, refreshTTL time.Duration, passcode string, allowlist map[string]struct{}) *Auth {
 	return &Auth{
 		idps:       idps,
 		users:      users,
 		refresh:    refresh,
 		jwtIssuer:  jwtIssuer,
 		refreshTTL: refreshTTL,
+		passcode:   passcode,
 		allowlist:  allowlist,
 	}
 }
 
 // Exchange takes a provider id_token, verifies it, finds-or-creates the local
-// user, and returns a fresh access + refresh token pair. Returns ErrNotAllowed
-// if an allowlist is configured and the verified external_id isn't in it.
-func (a *Auth) Exchange(ctx context.Context, provider, idToken, userAgent, ipAddr string) (*TokenPair, error) {
+// user, and returns a fresh access + refresh token pair.
+//
+// Two gates are checked in order, both optional:
+//  1. Passcode — if configured, the request must include a matching string.
+//     Checked BEFORE verify so strangers can't probe provider behavior.
+//  2. Allowlist — if configured, the verified external_id must be on it.
+func (a *Auth) Exchange(ctx context.Context, provider, idToken, passcode, userAgent, ipAddr string) (*TokenPair, error) {
+	if a.passcode != "" {
+		// Constant-time compare so timing differences don't leak the passcode
+		// to a brute-force attacker.
+		if subtle.ConstantTimeCompare([]byte(passcode), []byte(a.passcode)) != 1 {
+			return nil, ErrBadPasscode
+		}
+	}
 	identity, err := a.idps.Verify(ctx, provider, idToken)
 	if err != nil {
 		return nil, fmt.Errorf("verify id token: %w", err)

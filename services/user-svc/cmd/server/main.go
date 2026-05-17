@@ -108,16 +108,21 @@ func run() error {
 		slog.Info("google id-token verifier enabled", "audience", googleAudience)
 	}
 
-	// Optional sign-in allowlist for the public demo. If ALLOWED_EXTERNAL_IDS
-	// is set (comma-separated), only those external_ids may exchange — keeps
-	// the deployed demo from being writable by anyone with the URL. Unset =
-	// allow everyone, matches local dev behavior.
+	// Two independent demo gates for the public deployment:
+	//   SIGN_IN_PASSCODE   — shared secret string the client must send
+	//   ALLOWED_EXTERNAL_IDS — comma-separated list of verified external_ids
+	// Both unset = allow everyone (local docker-compose behavior).
+	// Both set = double protection: must know the passcode AND be on the list.
+	passcode := configx.String("SIGN_IN_PASSCODE", "")
+	if passcode != "" {
+		slog.Info("sign-in passcode required")
+	}
 	allowlist := parseAllowlist(configx.String("ALLOWED_EXTERNAL_IDS", ""))
 	if len(allowlist) > 0 {
 		slog.Info("sign-in allowlist enabled", "size", len(allowlist))
 	}
 
-	auth := service.NewAuth(idps, users, refresh, jwtIssuer, refreshTTL, allowlist)
+	auth := service.NewAuth(idps, users, refresh, jwtIssuer, refreshTTL, passcode, allowlist)
 
 	// Optional S3 client for avatars. If no bucket is set, avatar endpoints
 	// return 503 — useful so dev runs without object storage still come up
